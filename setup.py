@@ -5,7 +5,7 @@ with open("README.md", "r") as fh:
 
 setuptools.setup(
     name="PaPdf",
-    version="1.0.0",
+    version="1.0.1",
     author="GCoppex",
     author_email="g.coppex@gmail.com",
     description="A python package to create PDF files",

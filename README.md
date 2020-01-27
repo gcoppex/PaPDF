@@ -7,6 +7,11 @@ Python library to create PDF
  - TrueType font embedding (including propper font subsetting)
  - EAN13 barcode insertion
 
+## Installation:
+Use `pip3`for the installation of `PaPDF`:
+```bash
+pip3 install PaPDF
+```
 ## Simple usage example:
 
 The following snippet will create a pdf (`test.pdf`) with two pages and two
