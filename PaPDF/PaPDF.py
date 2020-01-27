@@ -1,7 +1,9 @@
 import os, sys, io, zlib
 from datetime import datetime
 import collections
-import TrueType
+
+from .PaPDF import *
+
 
 class PaPDF:
     PAGE_FORMATS = {
@@ -51,8 +53,9 @@ class PaPDF:
             "fontObjectReference":-1,
             "usedCharacters": set(),
         }
-        self.currentFontName = "Helvetica";
-        self.fontSize = 10;
+        self.currentFontName = "Helvetica"
+        self.fontSize = 10
+        self.lineThickness = 0.66 / PaPDF.MM_TO_DPI
 
         # Page related variables: the page id, the pageStream.
         self.pageId = -1
@@ -91,6 +94,8 @@ class PaPDF:
         Helper (private) function to flush the page stream into the PDF buffer.
         """
         if len(self.pageStream)>0 :
+            print("Content:")
+            print(self.pageStream)
             self._addNewObject()
             filter = ""
             content = self.pageStream
@@ -147,8 +152,99 @@ class PaPDF:
         output += "2 J" + "\n"
         output += "BT /F%d %.2f Tf ET" % (pdfFontId, self.fontSize) + "\n"
         output += ("BT %.2f %.2f Td (%s) Tj ET" \
-            % (x*PaPDF.MM_TO_DPI, y*PaPDF.MM_TO_DPI, text)) + "\n"
-        self.pageStream += output.encode("Latin-1");
+            % (x * PaPDF.MM_TO_DPI, y * PaPDF.MM_TO_DPI, text)) + "\n"
+        self.pageStream += output.encode("Latin-1")
+
+
+    def addLine(self, x0, y0, x1, y1):
+        """
+        Add a line from (x0,y0) to (x1,y1)
+        """
+        output = ""
+        output += "%.2f w\n" % (self.lineThickness * PaPDF.MM_TO_DPI)
+        output += "%.2f %.2f m %.2f %.2f l S\n" \
+            % (x0 * PaPDF.MM_TO_DPI,
+            y0 * PaPDF.MM_TO_DPI,
+            x1 * PaPDF.MM_TO_DPI,
+            y1 * PaPDF.MM_TO_DPI)
+        self.pageStream += output.encode("Latin-1")
+
+    def addEAN13(self, x0, y0, numbers):
+        if len(numbers) != 13:
+            raise Exception("The EAN barcode expects a sequence of 9 numbers")
+
+        patterns = ["LLLLLL", "LLGLGG", "LLGGLG", "LLGGGL", "LGLLGG", "LGGLLG", "LGGGLL", "LGLGLG", "LGLGGL", "LGGLGL"]
+        lValues = [0x0D, 0x19, 0x13, 0x3D, 0x23, 0x31, 0x2F, 0x3B, 0x37, 0x0B]
+
+        height = 50 / PaPDF.MM_TO_DPI
+        bottomTextHeight = 10 / PaPDF.MM_TO_DPI
+        barWidth = 1 / PaPDF.MM_TO_DPI
+
+        barcodeBytes = [0x05] # start marker
+        pattern = patterns[int(numbers[0])]
+        for i in range(1,13):
+            try:
+                d = int(numbers[i])
+                lValue = lValues[d]
+                rValue = lValue ^ 0x7F
+                table = "R"
+                if i<=6:
+                    table = pattern[i-1]
+                    value = None
+                    if table == "G":
+                        gValue = 0x00
+                        for j in range(0,7):
+                            bit = ((rValue >> j ) & 0x01) << (7-j-1)
+                            gValue += bit
+                        value = gValue
+                    else:
+                        value = lValue
+                else:
+                    value = rValue
+                barcodeBytes.append(value)
+                if i==6:
+                    # Adding the center marker:
+                    barcodeBytes.append(0x0A)
+            except:
+                raise Exception("Each of the 13 digits must be in [0-9].")
+        barcodeBytes.append(0x05) # end marker
+
+        oldLineThickness = self.lineThickness
+        oldFontSize = self.fontSize
+        sizes = [3] + [7]*6 + [5] + [7]*6 + [3]
+        self.lineThickness = barWidth
+        self.fontSize = 8
+        leftMargin =  0.5 / PaPDF.MM_TO_DPI
+        x = x0 + leftMargin
+        for i,size in enumerate(sizes):
+            if i == 0 or i == 8 or i == 14:
+                y = y0 + bottomTextHeight - bottomTextHeight
+                h = height + bottomTextHeight
+            else:
+                y = y0 + bottomTextHeight
+                h = height
+            for j in range(size):
+                if ((barcodeBytes[i] >> (size-j-1)) & 0x01):
+                    #print("X", end="")
+                    self.addLine(x, y, x, y + h)
+                else:
+                    #print("_", end="")
+                    pass
+                x += barWidth
+
+        #self.addText(x0, y0, numbers[0])
+
+        x = x0 + leftMargin + 3 * barWidth
+        y = y0
+        for i,n in enumerate(numbers[1:]):
+            self.addText(x + 3* barWidth, y, n)
+            x += 7 * barWidth
+            if i == 8:
+                x += 2 * barWidth
+
+        # restoration of the initial line thickness:
+        self.lineThickness = oldLineThickness
+        self.fontSize = oldFontSize
 
     def _addNewObject(self):
         """
