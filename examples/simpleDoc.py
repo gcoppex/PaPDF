@@ -1,4 +1,4 @@
-import PaPDF
+from PaPDF import PaPDF
 
 def main():
     with PaPDF("test.pdf") as pdf:

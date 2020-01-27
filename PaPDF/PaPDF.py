@@ -11,7 +11,7 @@ class PaPDF:
         "LETTER": [215.9, 279.4],
         "LEGAL": [215.9, 355.6]
     }
-    PROGRAM_NAME = "PAPDF v.0.1"
+    PROGRAM_NAME = "PaPDF v.0.1"
     PDF_VERSION = "1.3"
     MM_TO_DPI = 72 / 25.4;
     def __init__(self, filename, pageFormat="A4", title=""):
@@ -31,9 +31,9 @@ class PaPDF:
         self.compress = True
 
         try:
-            self.w_mm, self.h_mm = PAPDF.PAGE_FORMATS[upper(pageFormat)]
+            self.w_mm, self.h_mm = PaPDF.PAGE_FORMATS[upper(pageFormat)]
         except:
-            self.w_mm, self.h_mm = PAPDF.PAGE_FORMATS["A4"]
+            self.w_mm, self.h_mm = PaPDF.PAGE_FORMATS["A4"]
 
         # Handling of fonts: dict of fonts, current font name and font size,
         # with Helvetica being the default font.
@@ -147,7 +147,7 @@ class PaPDF:
         output += "2 J" + "\n"
         output += "BT /F%d %.2f Tf ET" % (pdfFontId, self.fontSize) + "\n"
         output += ("BT %.2f %.2f Td (%s) Tj ET" \
-            % (x*PAPDF.MM_TO_DPI, y*PAPDF.MM_TO_DPI, text)) + "\n"
+            % (x*PaPDF.MM_TO_DPI, y*PaPDF.MM_TO_DPI, text)) + "\n"
         self.pageStream += output.encode("Latin-1");
 
     def _addNewObject(self):
@@ -401,7 +401,7 @@ class PaPDF:
         self._bufferAppend("/Count " + str(self.pageId+1))
         # Page size definition:
         self._bufferAppend("/MediaBox [0 0 %.2f %.2f]" \
-            % (PAPDF.MM_TO_DPI*self.w_mm, PAPDF.MM_TO_DPI*self.h_mm))
+            % (PaPDF.MM_TO_DPI*self.w_mm, PaPDF.MM_TO_DPI*self.h_mm))
         self._bufferAppend(">>")
         self._bufferAppend("endobj")
 
@@ -435,7 +435,7 @@ class PaPDF:
         # Adding the information on the PDF extra metadata fields:
         self._addNewObject()
         self._bufferAppend("<<")
-        self._out_prefix_paren("Producer", PAPDF.PROGRAM_NAME)
+        self._out_prefix_paren("Producer", PaPDF.PROGRAM_NAME)
         self._out_prefix_paren("Title", self.title)
         # Todo: add support for the other metadata :
         # ["Subject", "Author", "Keywords", "Creator"]
