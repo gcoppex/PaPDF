@@ -55,7 +55,7 @@ class PaPDF:
         }
         self.currentFontName = "Helvetica"
         self.fontSize = 10
-        self.lineThickness = 0.66 / PaPDF.MM_TO_DPI
+        self.lineThickness = 1 * PaPDF.MM_TO_DPI
 
         # Page related variables: the page id, the pageStream.
         self.pageId = -1
@@ -94,8 +94,6 @@ class PaPDF:
         Helper (private) function to flush the page stream into the PDF buffer.
         """
         if len(self.pageStream)>0 :
-            print("Content:")
-            print(self.pageStream)
             self._addNewObject()
             filter = ""
             content = self.pageStream
@@ -161,7 +159,7 @@ class PaPDF:
         Add a line from (x0,y0) to (x1,y1)
         """
         output = ""
-        output += "%.2f w\n" % (self.lineThickness * PaPDF.MM_TO_DPI)
+        output += "%.2f w 0 J\n" % (self.lineThickness * PaPDF.MM_TO_DPI)
         output += "%.2f %.2f m %.2f %.2f l S\n" \
             % (x0 * PaPDF.MM_TO_DPI,
             y0 * PaPDF.MM_TO_DPI,
@@ -176,9 +174,11 @@ class PaPDF:
         patterns = ["LLLLLL", "LLGLGG", "LLGGLG", "LLGGGL", "LGLLGG", "LGGLLG", "LGGGLL", "LGLGLG", "LGLGGL", "LGGLGL"]
         lValues = [0x0D, 0x19, 0x13, 0x3D, 0x23, 0x31, 0x2F, 0x3B, 0x37, 0x0B]
 
-        height = 50 / PaPDF.MM_TO_DPI
-        bottomTextHeight = 10 / PaPDF.MM_TO_DPI
-        barWidth = 1 / PaPDF.MM_TO_DPI
+        heightMillimeters = 21.35
+        bottomLongerBarsHeightMillimeters = 1.5
+        bottomTextHeightMillimeters = 2.33
+        barWidthMillimeters = 0.33
+        leftMargin =  1.6
 
         barcodeBytes = [0x05] # start marker
         pattern = patterns[int(numbers[0])]
@@ -212,35 +212,56 @@ class PaPDF:
         oldLineThickness = self.lineThickness
         oldFontSize = self.fontSize
         sizes = [3] + [7]*6 + [5] + [7]*6 + [3]
-        self.lineThickness = barWidth
         self.fontSize = 8
-        leftMargin =  0.5 / PaPDF.MM_TO_DPI
         x = x0 + leftMargin
+
+        barXYPositionsAndHeights = []
         for i,size in enumerate(sizes):
             if i == 0 or i == 8 or i == 14:
-                y = y0 + bottomTextHeight - bottomTextHeight
-                h = height + bottomTextHeight
+                y = y0 + bottomTextHeightMillimeters
+                h = heightMillimeters + bottomLongerBarsHeightMillimeters
             else:
-                y = y0 + bottomTextHeight
-                h = height
+                y = y0 + bottomLongerBarsHeightMillimeters + bottomTextHeightMillimeters
+                h = heightMillimeters
             for j in range(size):
                 if ((barcodeBytes[i] >> (size-j-1)) & 0x01):
-                    #print("X", end="")
-                    self.addLine(x, y, x, y + h)
-                else:
-                    #print("_", end="")
-                    pass
-                x += barWidth
+                    barXYPositionsAndHeights.append((x, y, h))
+                x += barWidthMillimeters
+
+        i = 0
+        while i < len(barXYPositionsAndHeights):
+            x, y, h = barXYPositionsAndHeights[i]
+
+            thickness = 1
+            j=i+1
+            lastX = x
+            lastY = y
+            while j < len(barXYPositionsAndHeights) \
+                and abs((barXYPositionsAndHeights[j][0] - lastX) -\
+                    barWidthMillimeters) < 0.01 \
+                and lastY == barXYPositionsAndHeights[j][1]:
+                thickness += 1
+                lastX = barXYPositionsAndHeights[j][0]
+                lastY = barXYPositionsAndHeights[j][1]
+                i += 1
+                j += 1
+            self.lineThickness = barWidthMillimeters * thickness
+
+            midX = (x+lastX)/2
+            self.addLine(midX, y, midX, y + h)
+            i += 1
 
         #self.addText(x0, y0, numbers[0])
 
-        x = x0 + leftMargin + 3 * barWidth
+        self.addText(x0, y0, numbers[0])
+        x = x0 + leftMargin + 1 + 3 * barWidthMillimeters
         y = y0
         for i,n in enumerate(numbers[1:]):
-            self.addText(x + 3* barWidth, y, n)
-            x += 7 * barWidth
-            if i == 8:
-                x += 2 * barWidth
+            self.addText(x, y, n)
+            x += 7 * barWidthMillimeters
+            if i == 7:
+                x += 2 * barWidthMillimeters
+        self.addText(x, y0, ">")
 
         # restoration of the initial line thickness:
         self.lineThickness = oldLineThickness
@@ -578,4 +599,3 @@ class PaPDF:
         self._addAppendix()
         with open(self.filename,"wb") as f:
             f.write(self.buffer)
-        print("written to " + self.filename)
