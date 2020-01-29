@@ -167,105 +167,123 @@ class PaPDF:
             y1 * PaPDF.MM_TO_DPI)
         self.pageStream += output.encode("Latin-1")
 
-    def addEAN13(self, x0, y0, numbers):
+    def setLineThickness(self, thickness):
+        """ Set the line thickness (in millimeters)"""
+        self.lineThickness = thickness
+
+    def getLineThickness(self):
+        """ get the line thickness (in millimeters)"""
+        return self.lineThickness
+
+    def addEAN13(self, x0, y0, numbers, validateChecksum=True):
         if len(numbers) != 13:
             raise Exception("The EAN barcode expects a sequence of 9 numbers")
+
+        # validating of the checksum
+        # (the last digit is a weighted sum of the 12 previous digits):
+        receivedChecksum = int(numbers[12])
+        computedChecksum = 0
+        weights = [1,3]*6
+        computedChecksum = sum([int(d) * w for d,w in zip(numbers[0:12], weights)])
+        computedChecksum = (10-(computedChecksum%10))%10
+
+        numbers = numbers[0:12] + str(computedChecksum)
+
+        if validateChecksum and not computedChecksum == receivedChecksum:
+            raise Exception("The EAN barcode checksum (last digit) is " \
+                + "incorred (got %d, should be %d)" \
+                % (receivedChecksum, computedChecksum))
+
 
         patterns = ["LLLLLL", "LLGLGG", "LLGGLG", "LLGGGL", "LGLLGG", "LGGLLG", "LGGGLL", "LGLGLG", "LGLGGL", "LGGLGL"]
         lValues = [0x0D, 0x19, 0x13, 0x3D, 0x23, 0x31, 0x2F, 0x3B, 0x37, 0x0B]
 
-        heightMillimeters = 21.35
-        bottomLongerBarsHeightMillimeters = 1.5
-        bottomTextHeightMillimeters = 2.33
-        barWidthMillimeters = 0.33
+        # Measurements in millimeters:
+        longBarHeight = 22.85
+        barWidth = 0.33
+        smallBarsBottomVSpace = 1.5
+        textBottomVSpace = 2.33
         leftMargin =  1.6
 
-        barcodeBytes = [0x05] # start marker
-        pattern = patterns[int(numbers[0])]
-        for i in range(1,13):
-            try:
-                d = int(numbers[i])
-                lValue = lValues[d]
-                rValue = lValue ^ 0x7F
-                table = "R"
-                if i<=6:
-                    table = pattern[i-1]
-                    value = None
-                    if table == "G":
-                        gValue = 0x00
-                        for j in range(0,7):
-                            bit = ((rValue >> j ) & 0x01) << (7-j-1)
-                            gValue += bit
-                        value = gValue
-                    else:
-                        value = lValue
-                else:
-                    value = rValue
-                barcodeBytes.append(value)
-                if i==6:
-                    # Adding the center marker:
-                    barcodeBytes.append(0x0A)
-            except:
-                raise Exception("Each of the 13 digits must be in [0-9].")
-        barcodeBytes.append(0x05) # end marker
-
         oldLineThickness = self.lineThickness
+        self.lineThickness = barWidth
+
+        # start marker (101):
+        x = x0 + leftMargin + barWidth / 2.0 # border-to-center offset
+        y = y0 + textBottomVSpace
+        h = longBarHeight
+        for i in range(3):
+            if i%2 == 0:
+                self.addLine(x, y, x, y + h)
+            x += barWidth
+
+        # left first half:
+        pattern = patterns[int(numbers[0])]
+        h = longBarHeight - smallBarsBottomVSpace
+        y = y0 + textBottomVSpace + smallBarsBottomVSpace
+
+        # the first char is encoded by choosing a pattern, Skipping it below:
+        for i, n in enumerate(numbers[1:7]):
+            try:
+                d = int(n)
+                bitValue = lValues[d]
+                table = pattern[i]
+                rng = list(range(0,7))
+                if table == "G":
+                    rng.reverse()
+                    bitValue ^= 0x7F
+                for j in rng:
+                    if ((bitValue >> (6-j) ) & 0x01)  == 1:
+                        self.addLine(x, y, x, y + h)
+                    x += barWidth
+            except Exception as e:
+                raise Exception("Each of the 13 digits must be in [0-9].")
+
+        # middle marker (01010):
+        y = y0 + textBottomVSpace
+        h = longBarHeight
+        for i in range(5):
+            if i%2 == 1:
+                self.addLine(x, y, x, y + h)
+            x += barWidth
+
+        h = longBarHeight - smallBarsBottomVSpace
+        y = y0 + textBottomVSpace + smallBarsBottomVSpace
+        # right second half:
+        for i, n in enumerate(numbers[7:13]):
+            d = int(n)
+            value = lValues[d] ^ 0x7F
+            for j in range(0,7):
+                if ((value >> (6-j) ) & 0x01)  == 1:
+                    self.addLine(x, y, x, y + h)
+                x += barWidth
+
+
+        # end marker (01010):
+        y = y0 + textBottomVSpace
+        h = longBarHeight
+        for i in range(3):
+            if i%2 == 0:
+                self.addLine(x, y, x, y + h)
+            x += barWidth
+
+        # Bottom text:
         oldFontSize = self.fontSize
-        sizes = [3] + [7]*6 + [5] + [7]*6 + [3]
         self.fontSize = 8
-        x = x0 + leftMargin
-
-        barXYPositionsAndHeights = []
-        for i,size in enumerate(sizes):
-            if i == 0 or i == 8 or i == 14:
-                y = y0 + bottomTextHeightMillimeters
-                h = heightMillimeters + bottomLongerBarsHeightMillimeters
-            else:
-                y = y0 + bottomLongerBarsHeightMillimeters + bottomTextHeightMillimeters
-                h = heightMillimeters
-            for j in range(size):
-                if ((barcodeBytes[i] >> (size-j-1)) & 0x01):
-                    barXYPositionsAndHeights.append((x, y, h))
-                x += barWidthMillimeters
-
-        i = 0
-        while i < len(barXYPositionsAndHeights):
-            x, y, h = barXYPositionsAndHeights[i]
-
-            thickness = 1
-            j=i+1
-            lastX = x
-            lastY = y
-            while j < len(barXYPositionsAndHeights) \
-                and abs((barXYPositionsAndHeights[j][0] - lastX) -\
-                    barWidthMillimeters) < 0.01 \
-                and lastY == barXYPositionsAndHeights[j][1]:
-                thickness += 1
-                lastX = barXYPositionsAndHeights[j][0]
-                lastY = barXYPositionsAndHeights[j][1]
-                i += 1
-                j += 1
-            self.lineThickness = barWidthMillimeters * thickness
-
-            midX = (x+lastX)/2
-            self.addLine(midX, y, midX, y + h)
-            i += 1
-
-        #self.addText(x0, y0, numbers[0])
-
         self.addText(x0, y0, numbers[0])
-        x = x0 + leftMargin + 1 + 3 * barWidthMillimeters
+        x = x0 + leftMargin + 1 + 3 * barWidth
         y = y0
         for i,n in enumerate(numbers[1:]):
             self.addText(x, y, n)
-            x += 7 * barWidthMillimeters
-            if i == 7:
-                x += 2 * barWidthMillimeters
+            x += 7 * barWidth
+            if i == 5:
+                x += 2 * barWidth
+        x += 1
         self.addText(x, y0, ">")
 
-        # restoration of the initial line thickness:
-        self.lineThickness = oldLineThickness
+        # Restoring the original values:
         self.fontSize = oldFontSize
+        self.lineThickness = oldLineThickness
 
     def _addNewObject(self):
         """
