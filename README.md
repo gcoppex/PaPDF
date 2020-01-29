@@ -26,7 +26,7 @@ with PaPDF("test.pdf") as pdf:
 ```
 
 
-
+### TrueType font embedding:
 More advanced example with the usage of a (subsetted) TrueType font. Basically
 the same example as above but with a custom font, loaded from a font file.
 ```python
@@ -39,10 +39,12 @@ with PaPDF("test.pdf") as pdf:
     pdf.addText(40, 10, 'Hello world')
 ```
 
-Adding a barcode is pretty straight forward:
+### Adding EAN13 Barcode:
+Adding a barcode is pretty straight forward. Warning: make sure the last digit checksum is correctly computed, when calling the `addEAN13()` function.
 ```python
 import PaPDF
 with PaPDF("barcode.pdf") as pdf:
     pdf.addText(20, 250, "Simple EAN13 barcode example:")
     pdf.addEAN13(20, 225, "4012345123456")
 ```
+![Generated barcode example](https://raw.githubusercontent.com/gcoppex/PaPDF/master/examples/barcode.png)
