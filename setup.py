@@ -1,24 +1,20 @@
 import setuptools
+from os import path
 
-long_description = "# PaPDF" \
- + "Python library to create PDF" \
- + "## Features:" \
- + " - Basic page addition (with support of multiple formats)" \
- + " - Basic text writing" \
- + " - TrueType font embedding (including propper font subsetting)" \
- + " - EAN13 barcode insertion "
+currDir = path.abspath(path.dirname(__file__))
+with open(path.join(currDir, 'README.md'), encoding='utf-8') as f:
+    long_description = f.read()
+
 
 
 setuptools.setup(
-    name="PaPdf",
+    name="PaPDF",
     version="1.0.3",
     author="GCoppex",
     author_email="g.coppex@gmail.com",
-    description="A python package to create PDF files.\nThe package" \
-        + "supports basic text edition, font embedding (TrueType) and EAN13 " \
-        + "barcode generation. Checkout https://github.com/gcoppex/PaPDF.",
+    description="A python package to create PDF files.",
     long_description=long_description,
-    long_description_content_type='text/markdown',
+    long_description_content_type="text/markdown",
     url="https://github.com/gcoppex/PaPDF",
     packages=setuptools.find_packages(),
     classifiers=[

@@ -2,7 +2,7 @@ import os, sys, io, zlib
 from datetime import datetime
 import collections
 
-from .PaPDF import *
+from . import TrueType
 
 
 class PaPDF:
@@ -321,6 +321,10 @@ class PaPDF:
             "fontObjectReference": fontObjectReference,
             "usedCharacters": set(),
         }
+    def setFont(self, fontName, fontSize=-1):
+        self.currentFontName = fontName
+        if fontSize >=0 :
+            self.fontSize = fontSize
 
     def _addTrueTypeFonts(self):
         """
@@ -349,10 +353,6 @@ class PaPDF:
             prefix = "PAPF" + prefix
 
             prefixedFontName = "%s+%s" % (prefix, fontName)
-
-
-
-
 
             # Preparation of the font subset and retrieval of the font metrics:
             ttp = TrueType.TrueTypeParser(fontDesc["fileName"])

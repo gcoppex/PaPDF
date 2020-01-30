@@ -282,6 +282,7 @@ class TrueTypeParser:
                 for i in range(segCount):
                     idDelta.append(byteStream.readBytes(2))
 
+                idRangeOffsetStart = f.seek(0, os.SEEK_CUR)
                 idRangeOffset = []
                 for i in range(segCount):
                     idRangeOffset.append(byteStream.readBytes(2))
@@ -293,10 +294,10 @@ class TrueTypeParser:
                         if idRangeOffset[n] == 0:
                             glyph = 0xFFFF & (currChar + idDelta[n])
                         else:
-                            offset = idRangeOffset_start + 2 * n \
-                                + (currChar - startCount[n]) * 2 \
+                            offset = idRangeOffsetStart + 2 * n \
+                                + (currChar - startCode[n]) * 2 \
                                 + idRangeOffset[n]
-                            if (offset < limit):
+                            if (offset >= cmapFormatOffset + length):
                                 f.seek(offset)
                                 glyph = byteStream.readBytes(2);
                                 if (glyph != 0):
