@@ -71,6 +71,7 @@ class PaPDF:
         self.objectCount = 2 # start at two, since the first object is /Pages
         # and the second object is the font reference table
         self.offsets = {}
+        self.images = {}
 
 
         self._bufferAppend("%PDF-"+self.PDF_VERSION)
@@ -172,6 +173,34 @@ class PaPDF:
             y1 * PaPDF.MM_TO_DPI)
         self.pageStream += output.encode("Latin-1")
 
+    def _parseJPG(self, fileObject):
+        # Helper function to parse a JPG fileobject and raise in case bad format
+        h, w, stream = 0,0,0
+        return h, w, stream
+
+    def _parsePNG(self, fileObject):
+        # Helper function to parse a PNG fileobject and raise in case bad format
+        h, w, stream = 0,0,0
+        return h, w, stream
+
+    def _parseGIF(self, fileObject):
+        # Helper function to parse a GIF fileobject and raise in case bad format
+        h, w, stream = 0,0,0
+        return h, w, stream
+
+    def addImage(self, filename, x, y, w, h):
+        if not imageUrl in self.images:
+            with open(filename,"wb") as f:
+                h, w, stream = 0,0,0
+                for func in [self._parseJPG, self._parsePNG, self._parseGIF]:
+                    try:
+                        h, w, stream = func(f)
+                        break;
+                    except Exception as e:
+                        pass
+
+            self.images[imageUrl] = (h, w, stream)
+            pass
     def setLineThickness(self, thickness):
         """ Set the line thickness (in millimeters)"""
         self.lineThickness = thickness
