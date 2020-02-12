@@ -2,7 +2,11 @@ import os, sys, io, zlib
 from datetime import datetime
 import collections
 
-from . import TrueType
+try:
+    import TrueType
+except Exception as e:
+    print(e)
+    from . import TrueType
 
 
 class PaPDF:
@@ -141,6 +145,7 @@ class PaPDF:
 
         # Update of the uniquely used characters, by the currFont font:
         newChars = [ord(c) for c in set(text) if ord(c) != 0]
+        print("new, adding char = ", newChars, text)
         currFont["usedCharacters"] = currFont["usedCharacters"].union(newChars)
 
         # Adding the pdf text commands to the PDF buffer:
@@ -319,7 +324,7 @@ class PaPDF:
             "fontType": "TrueType",
             "fileName": fileName,
             "fontObjectReference": fontObjectReference,
-            "usedCharacters": set(),
+            "usedCharacters": set(range(1,32)),
         }
     def setFont(self, fontName, fontSize=-1):
         self.currentFontName = fontName

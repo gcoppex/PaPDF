@@ -83,6 +83,12 @@ class TrueTypeParser:
         if self.embeddingData is not None:
             return self.embeddingData
 
+        # Sorting the charSubset:
+        charSubsetList = list(charSubset)
+        charSubsetList.sort()
+        charSubset = set(charSubsetList)
+
+
         # If the data is not cached, it needs to be parsed from the TTF file:
         with open(self.fileName, "rb") as f:
             byteStream = ByteStream(f)
@@ -297,7 +303,7 @@ class TrueTypeParser:
                             offset = idRangeOffsetStart + 2 * n \
                                 + (currChar - startCode[n]) * 2 \
                                 + idRangeOffset[n]
-                            if (offset >= cmapFormatOffset + length):
+                            if offset < cmapFormatOffset + length:
                                 f.seek(offset)
                                 glyph = byteStream.readBytes(2);
                                 if (glyph != 0):
@@ -399,15 +405,18 @@ class TrueTypeParser:
             f.seek(tables["loca"]["offset"])
             glyphOffset = []
             locaOffsets = []
+
+            offsetRatio = 1
             if indexToLocFormat == 0:
                 locaOffsets = byteStream.readArray(numGlyphs+1, 2)
+                offsetRatio = 2
             elif indexToLocFormat == 1:
                 locaOffsets = byteStream.readArray(numGlyphs+1, 4)
             else:
                 raise Exception("Unimplemented indexToLocFormat while parsing "
                     + "the loca table.")
             for n in range(numGlyphs):
-                glyphOffset.append(locaOffsets[n]*2)
+                glyphOffset.append(locaOffsets[n]*offsetRatio)
 
             subsetCharToGlyph = {}
             subsetMaxChar = 0
@@ -433,6 +442,32 @@ class TrueTypeParser:
             sortedSubsetCharToGlyph = list(subsetCharToGlyph.items())
             sortedSubsetCharToGlyph.sort()
 
+
+            # Consuming the glyf table to add Compound glyphs:
+            compoundGlyphs = []
+            startGlyfOffset = tables["glyf"]["offset"]
+            for char, glyph in subsetCharToGlyph.items():
+                f.seek(startGlyfOffset + glyphOffset[glyph])
+                numberOfContours = byteStream.readBytes(2, unsigned=False)
+                if numberOfContours < 0:
+                    f.seek(8, os.SEEK_CUR)
+                    while True:
+                        flags = byteStream.readBytes(2)
+                        glyphIndex = byteStream.readBytes(2)
+                        # If arguments are words, we skip 4 bytes else 2:
+                        seekOffset = 84 if (flags & 0x0001) else 2
+                        f.seek(seekOffset, os.SEEK_CUR)
+
+                        # Depending on  the scale, we skip 2, 4 or 8 bytes
+                        seekOffset = 2 if (flags & 0x0008) else \
+                            4 if (flags & 0x0040) else 8 \
+                                if (flags & 0x0080) else 0
+                        f.seek(seekOffset, os.SEEK_CUR)
+
+                        compoundGlyphs.append((1, glyphIndex))
+                        if not (flags & 0x0020):
+                            break # if no more glyfs, we break
+
             subsetGlyphToId = OrderedDict()
             for id,(char, glyph) in enumerate(sortedSubsetCharToGlyph):
                 subsetGlyphToId[glyph] = id
@@ -451,6 +486,7 @@ class TrueTypeParser:
                     lastChar = char
                 continuousSubsetCharToGlyph[groupChar] = lastGroup.copy()
 
+            sortedSubsetCharToGlyph += compoundGlyphs
             # Creating the "cmap" table:
             # UInt16 	version 	Version number (Set to zero)
             # UInt16 	numberSubtables 	Number of encoding subtables
@@ -480,7 +516,7 @@ class TrueTypeParser:
             #       indexArray, or 0
             #   UInt16 	glyphIndexArray[variable] 	Glyph index array
 
-            numGlyphs = numberOfHMetrics = len(charSubset)+1
+            numGlyphs = numberOfHMetrics = len(sortedSubsetCharToGlyph)+1
 
             #  endCode requires a last segment as 0xFFFF (read above), hence +1:
             segCount = len(continuousSubsetCharToGlyph)+1
@@ -539,14 +575,20 @@ class TrueTypeParser:
                     cmapBytes += struct.pack(">h", cm) # h: signed short
             subsetTableData["cmap"] = cmapBytes
 
+
             f.seek(tables["glyf"]["offset"])
             glyfData = f.read(tables["glyf"]["length"])
 
             newGlyfData = b""
             newHmtxData = b""
             newLocaData = b""
-            offsets = []
+            locaOffsets = [0]
             currOffset = 0
+
+            glyphToIndex = {}
+            for id, (char, glyph) in enumerate(sortedSubsetCharToGlyph):
+                glyphToIndex[glyph] = id + 1 # + 1 to count the (0.0)
+                    # first element of sortedSubsetCharToGlyph
 
             # Artificially adding a (0,0) char/glyph tuple, for code simplicity:
             for char, glyph in [(0,0)] + sortedSubsetCharToGlyph:
@@ -556,15 +598,56 @@ class TrueTypeParser:
 
                 # Updating the new glyf table:
                 glyphPos = glyphOffset[glyph]
-                if(glyph+1<len(glyphOffset)):
+                glyphLen = 0
+                if glyph+1 < len(glyphOffset):
                     glyphLen = glyphOffset[glyph+1] - glyphPos
-                else:
-                    glyphLen = 0
-                newGlyfData += bytes(glyfData[glyphPos:glyphPos+glyphLen])
 
-                newLocaData += struct.pack(">H", currOffset//2)
+                if glyphLen > 0:
+                    currGlyphData = bytearray(glyfData[glyphPos:glyphPos+glyphLen])
+                    numberOfContours = struct.unpack(">h", currGlyphData[0:2])[0]
+                    if numberOfContours<0:
+                        glyfOffset = 10
+                        moreGlyphs = True
+
+                        while moreGlyphs:
+                            flags = struct.unpack(">h", \
+                                currGlyphData[glyfOffset:glyfOffset+2])[0]
+                            moreGlyphs = flags &  (1 << 5)
+
+                            glyphIndex = struct.unpack(">h", \
+                                currGlyphData[glyfOffset+2:glyfOffset+4])[0]
+                            newGlyphId = glyphToIndex[glyphIndex]
+                            currGlyphData[glyfOffset+2:glyfOffset+4] = \
+                                struct.pack(">H", newGlyphId)
+
+                            # Depending on  the flags, we increment the offset:
+                            glyfOffset += 4
+                            glyfOffset += 4 if (flags & 0x0001) else 2
+                            glyfOffset += 2 if (flags & 0x0008) else \
+                                4 if (flags & 0x0040) else 8 \
+                                    if (flags & 0x0080) else 0
+                else:
+                    currGlyphData = b''
+
+
+                # Adding padding:
+                if len(currGlyphData)%4!=0:
+                    # Padding in case of too short data:
+                    paddingLength = 4-len(currGlyphData)%4
+                    currGlyphData += bytes([0x00] * paddingLength)
+                    currOffset += paddingLength
+                newGlyfData += currGlyphData
                 currOffset += glyphLen
-            newLocaData += struct.pack(">H", currOffset // 2) # last char offset
+                locaOffsets.append(currOffset)
+
+            # Preparing the loca data:
+            ratio = 0.5
+            format = ">H"
+            if indexToLocFormat == 1:
+                ratio = 1
+                format = ">L"
+            for locaOffset in locaOffsets:
+                newLocaData += struct.pack(format, int(locaOffset * ratio))
 
             # Putting the tables data in the subsetTableData:
             subsetTableData["glyf"] = newGlyfData
@@ -650,7 +733,6 @@ class TrueTypeParser:
                 tableDirectoryData += currData
                 offset += (len(tableData) + 3) & ~3
 
-
             for tableName, tableData in sorted(subsetTableData.items()):
                 tableData += b'\x00\x00\x00'
                 incr = tableData[0:len(tableData) & ~3]
@@ -660,7 +742,7 @@ class TrueTypeParser:
 
             # Adjusting `checkSumAdjustment` field of the head table:
             checksum = 0xB1B0AFBA - ByteStream.computeChecksum(output)
-            output[headOffset + 8:headOffset + 12] = struct.pack(">L", checksum)
+            output[headOffset + 8:headOffset + 12] = struct.pack(">L", 0xFFFFFFFF & checksum)
             output = bytes(output)
 
             charToGlyph = {}
