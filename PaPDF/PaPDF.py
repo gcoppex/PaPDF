@@ -1,6 +1,7 @@
 import os, sys, io, zlib
 from datetime import datetime
 import collections
+import struct
 
 try:
     import TrueType
@@ -34,7 +35,7 @@ class PaPDF:
         self.fill_color="%.3f %.3f %.3f RG" % (r/255.0,g/255.0,b/255.0)
 
         # Compress the text commands (can be turned off for debug purposes)
-        self.compress = True
+        self.compress = False
 
         try:
             self.w_mm, self.h_mm = PaPDF.PAGE_FORMATS[upper(pageFormat)]
@@ -175,59 +176,65 @@ class PaPDF:
 
     def _decodeJPG(self, fileObject):
         # Helper function to parse a JPG fileobject and raise in case bad format
-        h, w, stream = 0,0,b''
+        # Source: https://www.disktuna.com/list-of-jpeg-markers/
+        h, w, stream, extraInfos = 0, 0, b'', []
         # Reading the JPEG stream:
-        b0, b1 = struct.unpack('>BB', fileObject.read(2))
-        if not (b0==0xFF and b1==0xD8):
-            raise Exception("Could not find a JPEG prefix.")
-
         hasFoundSize = False
         while not hasFoundSize:
             b0, b1 = struct.unpack('>BB', fileObject.read(2))
             if b0 != 0xFF:
-                raise Error("Wrong JPEG marker prefix")
-
-            # Source: https://www.disktuna.com/list-of-jpeg-markers/
-            # The start of frame consists of 4 ranges of markers:
-            if (b1 >= 0xC0 and b1 <= 0xC3) or \
-                (b1 >= 0xC5 and b1 <= 0xC7) or \
-                (b1 >= 0xC9 and b1 <= 0xCB) or \
-                (b1 >= 0xCD and b1 <= 0xCF):
-                # The following marker is expected to contain the interesting data:
+                raise Exception("Wrong JPEG marker prefix")
+            if ((b1 >= 0xD0 and b1 <= 0xD9) or # Restart Markers
+                (b1 == 0xC8 or b1 >= 0xF0 and b1 <= 0xFD)): # JPEG extensions
+                continue # simple marker with no following bytes
+            else:
                 length = struct.unpack('>H', fileObject.read(2))[0]
-                print("size=", length)
                 if length <= 2:
                     raise Error("Invalid length after a Start of Frame marker.")
                 data = fileObject.read(length - 2)
-                bitsPerChannel_, h, w, layersQuantity_ = \
-                    struct.unpack_from('>BHHB', data)
-                break;
-            else:
-                continue
+                # The start of frame consists of 4 ranges of markers:
+                if (b1 >= 0xC0 and b1 <= 0xC3) or \
+                    (b1 >= 0xC5 and b1 <= 0xC7) or \
+                    (b1 >= 0xC9 and b1 <= 0xCB) or \
+                    (b1 >= 0xCD and b1 <= 0xCF):
+                    # If a marker falls into one of the previous marker ranges,
+                    # then it contains interesting data.
+                    bitsPerChannel, h, w, layersQuantity_ = \
+                        struct.unpack_from('>BHHB', data)
+                    extraInfos = [
+                        "/ColorSpace /DeviceRGB",
+                        "/BitsPerComponent %d" % bitsPerChannel,
+                        "/Filter /DCTDecode",
+                    ]
+                    hasFoundSize = True
+        if not hasFoundSize:
+            raise Exception("Could not read JPEG payload data")
         fileObject.seek(0)
-        return h, w, fileObject.read()
+        return h, w, fileObject.read(), extraInfos
 
     def _decodePNG(self, fileObject):
         # Helper function to parse a PNG fileobject and raise in case bad format
-        h, w, stream = 0,0,b''
-        return h, w, stream
+        h, w, stream, extraInfos = 0, 0, b'', []
+        return h, w, stream, extraInfos
 
     def _decodeGIF(self, fileObject):
         # Helper function to parse a GIF fileobject and raise in case bad format
-        h, w, stream = 0,0,b''
-        return h, w, stream
+        h, w, stream, extraInfos = 0, 0, b'', []
+        return h, w, stream, extraInfos
 
     def addImage(self, filename, x, y, w, h):
         if not filename in self.images:
-            with open(filename,"wb") as f:
+            with open(filename,"rb") as f:
                 h, w, stream = 0, 0, b''
+                imageId = len(self.images)
                 hasBeenEmbedded = False
                 for func in [self._decodeJPG, self._decodePNG, self._decodeGIF]:
                     try:
-                        h, w, stream = func(f)
+                        h, w, stream, extraInfos = func(f)
                         hasBeenEmbedded = True
                         break;
                     except Exception as e:
+                        print(e)
                         pass
                 if not hasBeenEmbedded:
                     raise Exception("The provided image could not be read.")
@@ -236,10 +243,15 @@ class PaPDF:
                         "height": h,
                         "width": w,
                         "fontObjectReference": -1,
-                        "imageId": len(self.images),
+                        "imageId": imageId,
                         "data": stream,
+                        "extraInfos": extraInfos,
                     }
-            pass
+        output = ""
+        output += "q %.2f 0 0 %.2f %.2f %.2f cm /I%d Do Q" \
+        % (w,h,x,y,imageId)
+        self.pageStream += output.encode("Latin-1")
+
     def setLineThickness(self, thickness):
         """ Set the line thickness (in millimeters)"""
         self.lineThickness = thickness
@@ -413,8 +425,13 @@ class PaPDF:
             self._bufferAppend("/Subtype /Image");
             self._bufferAppend("/Width %d" % imgDesc["width"]);
             self._bufferAppend("/Height %d" % imgDesc["height"]);
+            for extraInfo in imgDesc["extraInfos"]:
+                self._bufferAppend(extraInfo);
+
+
+
             # todo: put more params defined by PDF (bits per channels, ...)
-            self._bufferAppend("/Length %d" % len(imgDesc["data"]))
+            self._bufferAppend("/Length %d>>" % len(imgDesc["data"]))
             self._bufferAppend('stream')
             self._bufferAppend(imgDesc["data"])
             self._bufferAppend('endstream')
@@ -661,7 +678,7 @@ class PaPDF:
 
         # Adding the images:
         for _, imgDesc in self.images.items():
-            self._bufferAppend('/F%d %d 0 R' % (imgDesc["imageId"], imgDesc["fontObjectReference"]))
+            self._bufferAppend('/I%d %d 0 R' % (imgDesc["imageId"], imgDesc["fontObjectReference"]))
 
         self._bufferAppend(">>")
         self._bufferAppend(">>")
