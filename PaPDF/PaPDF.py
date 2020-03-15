@@ -252,6 +252,69 @@ class PaPDF:
         interalaceMethod = read4ByteNum(fileObject,1)
         crc = fileObject.read(4)
 
+        # PNG prediction (on encoding, PNG optimum)
+        # (Ref: PDF 32000-1:2008, Table 10)
+        if colorType == 2 or colorType == 6:
+            colorSpace ='DeviceRGB'
+            # RGB color type:
+            channels = 3
+        elif ct == 0 or ct == 4:
+            colorSpace ='DeviceGray'
+            channels = 1
+        else:
+            colorSpace ='Indexed'
+            channels = 1
+
+        decodeParms = "/Predictor 15 /Colors %d" % channels \
+            + " /BitsPerComponent %d /Columns %d" % (bitDepth, width)
+
+        # fetching and parsing the other chunks:
+        plteDATA = b""
+        trnsDATA = b""
+        streamDATA = b""
+        length = 1
+        while length>0:
+            length = read4ByteNum(fileObject)
+            type = fileObject.read(4).decode()
+            if type == "PLTE":
+                plteDATA = fileObject.read(length)
+            elif type == "tRNS":
+                # Handling of PNG transparency:
+                trnsDATA = bytearray(fileObject.read(length))
+                if colorType == 0:
+                    trnsDATA = [trnsDATA[1]]
+                elif colorType == 2:
+                    trnsDATA = [trnsDATA[1], trnsDATA[3], trnsDATA[5]]
+                else:
+                    offset = -1
+                    for i,b in enumerate(trnsDATA):
+                        if b == 0x00:
+                            offset = i
+                    if offset > 0:
+                        trnsDATA = [offset]
+                    else:
+                        trnsDATA = []
+                trnsDATA = bytes(trnsDATA)
+            elif type == "IDAT":
+                streamDATA = fileObject.read(length)
+            elif type == "IEND":
+                break
+            else:
+                fileObject.seek(length, os.SEEK_CUR) # skipping data
+        crc = fileObject.read(4)
+
+        # TODO: soft mask and palette PDF embedding...
+
+        extraInfos = [
+            "/ColorSpace %s" % colorSpace,
+            "/BitsPerComponent %d" % bitDepth,
+            "/Filter /FlateDecode",
+            "/DecodeParms <<%s>>" % decodeParms,
+            # TODO: refactor smask and palette and others...
+            #"/SMask 7 0 R" % ?
+        ]
+
+
         return h, w, stream, extraInfos
 
     def _decodeGIF(self, fileObject):
