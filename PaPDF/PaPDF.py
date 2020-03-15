@@ -124,6 +124,8 @@ class PaPDF:
         self._bufferAppend("<</Type /Page")
         self._bufferAppend("/Parent 1 0 R")
         self._bufferAppend("/Resources 2 0 R")
+        self._bufferAppend("/Group <</Type /Group /S /Transparency/CS "
+            + "/DeviceRGB>>")
         self._bufferAppend("/Contents " + str(self.objectCount + 1) + " 0 R>>")
         self._bufferAppend("endobj")
         self.pageId += 1
@@ -215,6 +217,41 @@ class PaPDF:
     def _decodePNG(self, fileObject):
         # Helper function to parse a PNG fileobject and raise in case bad format
         h, w, stream, extraInfos = 0, 0, b'', []
+
+        # Parsing the file header
+        # (ref: http://www.libpng.org/pub/png/book/chapter08.html)
+        header = fileObject.read(8)
+        print("header=", header)
+        if header != bytes([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]):
+            raise Exception("Could not parse the PNG header")
+
+        def read4ByteNum(fileObject, numBytes=4, unsigned=False):
+            # Helper function to read a `numBytes`-byte number on the PNG stream
+            data = fileObject.read(numBytes)
+            output = 0
+            for i in range(0, numBytes):
+                output += (data[i] << (8*(numBytes-1-i)))
+            if not unsigned and (output & (1 << 8*numBytes-1)):
+                # Reversing the two's complement:
+                output -= (1 << 8*numBytes)
+            return output;
+
+        # parsing the the IHDR chunk:
+        # The IHDR chunk must appear FIRST. It contains:
+        # (ref: http://www.libpng.org/pub/png/spec/1.2/PNG-Chunks.html)
+        length = read4ByteNum(fileObject)
+        type = fileObject.read(4).decode()
+        if type != "IHDR":
+            raise Exception("Could not parse the PNG IHDR chunk")
+        width = read4ByteNum(fileObject)
+        height = read4ByteNum(fileObject)
+        bitDepth = read4ByteNum(fileObject,1)
+        colorType = read4ByteNum(fileObject,1)
+        compressionMethod = read4ByteNum(fileObject,1)
+        filterMethod = read4ByteNum(fileObject,1)
+        interalaceMethod = read4ByteNum(fileObject,1)
+        crc = fileObject.read(4)
+
         return h, w, stream, extraInfos
 
     def _decodeGIF(self, fileObject):
@@ -230,6 +267,7 @@ class PaPDF:
                 hasBeenEmbedded = False
                 for func in [self._decodeJPG, self._decodePNG, self._decodeGIF]:
                     try:
+                        f.seek(0)
                         h, w, stream, extraInfos = func(f)
                         hasBeenEmbedded = True
                         break;
