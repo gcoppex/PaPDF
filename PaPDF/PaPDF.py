@@ -179,7 +179,7 @@ class PaPDF:
     def _decodeJPG(self, fileObject):
         # Helper function to parse a JPG fileobject and raise in case bad format
         # Source: https://www.disktuna.com/list-of-jpeg-markers/
-        h, w, stream, extraInfos = 0, 0, b'', []
+        h, w, stream, extraInfos, extraObjects = 0, 0, b'', [], []
         # Reading the JPEG stream:
         hasFoundSize = False
         while not hasFoundSize:
@@ -212,11 +212,11 @@ class PaPDF:
         if not hasFoundSize:
             raise Exception("Could not read JPEG payload data")
         fileObject.seek(0)
-        return h, w, fileObject.read(), extraInfos
+        return h, w, fileObject.read(), extraInfos, extraObjects
 
     def _decodePNG(self, fileObject):
         # Helper function to parse a PNG fileobject and raise in case bad format
-        h, w, stream, extraInfos = 0, 0, b'', []
+        h, w, stream, extraInfos, extraObjects = 0, 0, b'', [], []
 
         # Parsing the file header
         # (ref: http://www.libpng.org/pub/png/book/chapter08.html)
@@ -225,7 +225,7 @@ class PaPDF:
         if header != bytes([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]):
             raise Exception("Could not parse the PNG header")
 
-        def read4ByteNum(fileObject, numBytes=4, unsigned=False):
+        def read4ByteNum(fileObject, numBytes=4, unsigned=True):
             # Helper function to read a `numBytes`-byte number on the PNG stream
             data = fileObject.read(numBytes)
             output = 0
@@ -276,6 +276,7 @@ class PaPDF:
         while length>0:
             length = read4ByteNum(fileObject)
             type = fileObject.read(4).decode()
+            print("reading type=[%s]" % type, length)
             if type == "PLTE":
                 plteDATA = fileObject.read(length)
             elif type == "tRNS":
@@ -301,26 +302,43 @@ class PaPDF:
                 break
             else:
                 fileObject.seek(length, os.SEEK_CUR) # skipping data
-        crc = fileObject.read(4)
+            # each chunk is terminated by a CRC:
+            crc = fileObject.read(4)
 
-        # TODO: soft mask and palette PDF embedding...
+        smaskStream = b""; # TODO
 
         extraInfos = [
-            "/ColorSpace %s" % colorSpace,
+            "/ColorSpace /%s" % colorSpace,
             "/BitsPerComponent %d" % bitDepth,
             "/Filter /FlateDecode",
             "/DecodeParms <<%s>>" % decodeParms,
             # TODO: refactor smask and palette and others...
-            #"/SMask 7 0 R" % ?
         ]
+        extraObjects = {
+            "SMask": {
+                "Keys":[
+                        "/Type /XObject",
+                        "/Subtype /Image",
+                        "/Width %d" % width,
+                        "/Height %d" % height,
+                        "/ColorSpace /DeviceGray",
+                        "/BitsPerComponent %d" % bitDepth,
+                        "/Filter /FlateDecode",
+                        "/DecodeParms <<%s>>" % decodeParms,
+                        "/Length %d" % len(smaskStream),
+                    ],
+                "Stream": smaskStream
+                }
+
+        }
 
 
-        return h, w, stream, extraInfos
+        return height, width, streamDATA, extraInfos, extraObjects
 
     def _decodeGIF(self, fileObject):
         # Helper function to parse a GIF fileobject and raise in case bad format
-        h, w, stream, extraInfos = 0, 0, b'', []
-        return h, w, stream, extraInfos
+        h, w, stream, extraInfos, extraObjects = 0, 0, b'', [], []
+        return height, width, streamDATA, extraInfos, extraObjects
 
     def addImage(self, filename, x, y, w, h):
         if not filename in self.images:
