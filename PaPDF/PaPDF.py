@@ -6,7 +6,6 @@ import struct
 try:
     import TrueType
 except Exception as e:
-    print(e)
     from . import TrueType
 
 
@@ -149,7 +148,6 @@ class PaPDF:
 
         # Update of the uniquely used characters, by the currFont font:
         newChars = [ord(c) for c in set(text) if ord(c) != 0]
-        print("new, adding char = ", newChars, text)
         currFont["usedCharacters"] = currFont["usedCharacters"].union(newChars)
 
         # Adding the pdf text commands to the PDF buffer:
@@ -221,7 +219,6 @@ class PaPDF:
         # Parsing the file header
         # (ref: http://www.libpng.org/pub/png/book/chapter08.html)
         header = fileObject.read(8)
-        print("header=", header)
         if header != bytes([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]):
             raise Exception("Could not parse the PNG header")
 
@@ -240,8 +237,8 @@ class PaPDF:
         # The IHDR chunk must appear FIRST. It contains:
         # (ref: http://www.libpng.org/pub/png/spec/1.2/PNG-Chunks.html)
         length = read4ByteNum(fileObject)
-        type = fileObject.read(4).decode()
-        if type != "IHDR":
+        chunkType = fileObject.read(4).decode()
+        if chunkType != "IHDR":
             raise Exception("Could not parse the PNG IHDR chunk")
         width = read4ByteNum(fileObject)
         height = read4ByteNum(fileObject)
@@ -252,8 +249,6 @@ class PaPDF:
         interalaceMethod = read4ByteNum(fileObject,1)
         crc = fileObject.read(4)
 
-        # PNG prediction (on encoding, PNG optimum)
-        # (Ref: PDF 32000-1:2008, Table 10)
         if colorType == 2 or colorType == 6:
             colorSpace ='DeviceRGB'
             # RGB color type:
@@ -275,11 +270,10 @@ class PaPDF:
         length = 1
         while length>0:
             length = read4ByteNum(fileObject)
-            type = fileObject.read(4).decode()
-            print("reading type=[%s]" % type, length)
-            if type == "PLTE":
+            chunkType = fileObject.read(4).decode()
+            if chunkType == "PLTE":
                 plteDATA = fileObject.read(length)
-            elif type == "tRNS":
+            elif chunkType == "tRNS":
                 # Handling of PNG transparency:
                 trnsDATA = bytearray(fileObject.read(length))
                 if colorType == 0:
@@ -296,16 +290,58 @@ class PaPDF:
                     else:
                         trnsDATA = []
                 trnsDATA = bytes(trnsDATA)
-            elif type == "IDAT":
+            elif chunkType == "IDAT":
                 streamDATA = fileObject.read(length)
-            elif type == "IEND":
+            elif chunkType == "IEND":
                 break
             else:
                 fileObject.seek(length, os.SEEK_CUR) # skipping data
             # each chunk is terminated by a CRC:
             crc = fileObject.read(4)
 
-        smaskStream = b""; # TODO
+        colorStream = bytearray()
+        smaskStream = bytearray()
+
+        dec = zlib.decompress(streamDATA)
+
+        if colorType == 4: # Grayscale-Alpha image
+            offsetInScanline = 0
+            for b in dec:
+                if offsetInScanline%(width*2+1) == 0:
+                    # scanline filter type header, apending it to both streams
+                    colorStream.append(b)
+                    smaskStream.append(b)
+                    offsetInScanline = 0
+                else:
+                    if (offsetInScanline-1)%2<1: # -1 because of scanline header
+                        colorStream.append(b)
+                    else:
+                        smaskStream.append(b)
+                offsetInScanline += 1
+        elif colorType == 6: # RGBA image
+            offsetInScanline = 0
+            for b in dec:
+                if offsetInScanline%(width*4+1) == 0:
+                    # scanline filter type header, apending it to both streams
+                    colorStream.append(b)
+                    smaskStream.append(b)
+                    offsetInScanline = 0
+                else:
+                    if (offsetInScanline-1)%4<3: # -1 because of scanline header
+                        colorStream.append(b)
+                    else:
+                        smaskStream.append(b)
+                offsetInScanline += 1
+        else:
+            raise Exception("Unsupported PNG color type, " \
+               + "please use a RGBA color type or Greyscale/Alpha color type.")
+
+        colorStream = zlib.compress(colorStream)
+        smaskStream = zlib.compress(smaskStream)
+
+        smaskDecodeParms = "/Predictor 15 /Colors %d" % 1 \
+            + " /BitsPerComponent %d /Columns %d" % (bitDepth, width)
+        # for the transparency mask, only 1 channel is used.
 
         extraInfos = [
             "/ColorSpace /%s" % colorSpace,
@@ -324,48 +360,58 @@ class PaPDF:
                         "/ColorSpace /DeviceGray",
                         "/BitsPerComponent %d" % bitDepth,
                         "/Filter /FlateDecode",
-                        "/DecodeParms <<%s>>" % decodeParms,
+                        "/DecodeParms <<%s>>" % smaskDecodeParms,
                         "/Length %d" % len(smaskStream),
                     ],
                 "Stream": smaskStream
                 }
 
         }
+        return height, width, colorStream, extraInfos, extraObjects
 
-
-        return height, width, streamDATA, extraInfos, extraObjects
-
-    def _decodeGIF(self, fileObject):
-        # Helper function to parse a GIF fileobject and raise in case bad format
-        h, w, stream, extraInfos, extraObjects = 0, 0, b'', [], []
-        return height, width, streamDATA, extraInfos, extraObjects
 
     def addImage(self, filename, x, y, w, h):
-        if not filename in self.images:
-            with open(filename,"rb") as f:
-                h, w, stream = 0, 0, b''
-                imageId = len(self.images)
-                hasBeenEmbedded = False
-                for func in [self._decodeJPG, self._decodePNG, self._decodeGIF]:
+        with open(filename,"rb") as f:
+            h, w, stream, extraInfos, extraObjects = 0, 0, b'', [], []
+            imageId = len(self.images)
+            hasBeenEmbedded = False
+
+            imgExt = os.path.splitext(filename)[1].lower().replace(".","")
+            if imgExt == "jpeg" or imgExt == "jpg":
+                try:
+                    h, w, stream, extraInfos, extraObjects = self._decodeJPG(f)
+                    hasBeenEmbedded = True
+                except Exception as e:
+                    pass
+            elif imgExt == "png":
+                try:
+                    h, w, stream, extraInfos, extraObjects = self._decodePNG(f)
+                    hasBeenEmbedded = True
+                except Exception as e:
+                    pass
+
+            if not hasBeenEmbedded:
+                # Iterative try to parse the image:
+                for func in [self._decodeJPG, self._decodePNG]:
                     try:
                         f.seek(0)
-                        h, w, stream, extraInfos = func(f)
+                        h, w, stream, extraInfos, extraObjects = func(f)
                         hasBeenEmbedded = True
                         break;
                     except Exception as e:
-                        print(e)
                         pass
-                if not hasBeenEmbedded:
-                    raise Exception("The provided image could not be read.")
-                else:
-                    self.images[filename] = {
-                        "height": h,
-                        "width": w,
-                        "fontObjectReference": -1,
-                        "imageId": imageId,
-                        "data": stream,
-                        "extraInfos": extraInfos,
-                    }
+            if not hasBeenEmbedded:
+                raise Exception("The provided image could not be read.")
+            else:
+                self.images[filename] = {
+                    "height": h,
+                    "width": w,
+                    "fontObjectReference": -1,
+                    "imageId": imageId,
+                    "data": stream,
+                    "extraInfos": extraInfos,
+                    "extraObjects": extraObjects,
+                }
         output = ""
         output += "q %.2f 0 0 %.2f %.2f %.2f cm /I%d Do Q" \
         % (w,h,x,y,imageId)
@@ -547,6 +593,11 @@ class PaPDF:
             for extraInfo in imgDesc["extraInfos"]:
                 self._bufferAppend(extraInfo);
 
+            extraObjectCount = self.objectCount + 1
+            for extraObjectKey, extraObjectValue in imgDesc["extraObjects"].items():
+                self._bufferAppend("/%s %d 0 R" \
+                    % (extraObjectKey, extraObjectCount))
+                extraObjectCount += 1
 
 
             # todo: put more params defined by PDF (bits per channels, ...)
@@ -555,6 +606,22 @@ class PaPDF:
             self._bufferAppend(imgDesc["data"])
             self._bufferAppend('endstream')
             self._bufferAppend("endobj")
+
+            for extraObjectKey, extraObjectValue in imgDesc["extraObjects"].items():
+                self._addNewObject()
+                self._bufferAppend("<<", endLine="")
+
+                for i,line in enumerate(extraObjectValue["Keys"]):
+                    if i == len(extraObjectValue["Keys"]) - 1:
+                        self._bufferAppend(line, endLine="")
+                    else:
+                        self._bufferAppend(line)
+
+                self._bufferAppend(">>")
+                self._bufferAppend('stream')
+                self._bufferAppend(extraObjectValue["Stream"])
+                self._bufferAppend('endstream')
+                self._bufferAppend("endobj")
 
     def _addTrueTypeFonts(self):
         """
