@@ -2,9 +2,7 @@
 Python library to create PDF
 
 ## Features:
- - Basic page addition (with support of multiple formats)
- - Basic text writing
- - TrueType font embedding (including propper font subsetting)
+ - Basic text writing with TrueType font embedding (including propper font subsetting)
  - Image insertion (JPEG images and PNG with transparency images support)
  - EAN13 barcode insertion
 
