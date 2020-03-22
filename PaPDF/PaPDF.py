@@ -272,7 +272,7 @@ class PaPDF:
             length = read4ByteNum(fileObject)
             chunkType = fileObject.read(4).decode()
             if chunkType == "PLTE":
-                plteDATA = fileObject.read(length)
+                plteDATA += fileObject.read(length)
             elif chunkType == "tRNS":
                 # Handling of PNG transparency:
                 trnsDATA = bytearray(fileObject.read(length))
@@ -291,7 +291,7 @@ class PaPDF:
                         trnsDATA = []
                 trnsDATA = bytes(trnsDATA)
             elif chunkType == "IDAT":
-                streamDATA = fileObject.read(length)
+                streamDATA += fileObject.read(length)
             elif chunkType == "IEND":
                 break
             else:
