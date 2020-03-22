@@ -370,10 +370,10 @@ class PaPDF:
         return height, width, colorStream, extraInfos, extraObjects
 
 
-    def addImage(self, filename, x, y, w, h):
+    def addImage(self, filename, x, y, width, height):
         with open(filename,"rb") as f:
             h, w, stream, extraInfos, extraObjects = 0, 0, b'', [], []
-            imageId = len(self.images)
+            imageId = len(self.images)+1 # PDF object refs starts at 1
             hasBeenEmbedded = False
 
             imgExt = os.path.splitext(filename)[1].lower().replace(".","")
@@ -414,7 +414,11 @@ class PaPDF:
                 }
         output = ""
         output += "q %.2f 0 0 %.2f %.2f %.2f cm /I%d Do Q" \
-        % (w,h,x,y,imageId)
+        % (width * PaPDF.MM_TO_DPI,
+            height * PaPDF.MM_TO_DPI,
+            x * PaPDF.MM_TO_DPI,
+            y * PaPDF.MM_TO_DPI,
+            imageId)
         self.pageStream += output.encode("Latin-1")
 
     def setLineThickness(self, thickness):
@@ -577,11 +581,13 @@ class PaPDF:
             self.fontSize = fontSize
 
     def _addImageStreams(self):
+        print("self.images=", len(self.images))
         filter = ""
         if self.compress:
             filter = "/Filter /FlateDecode "
 
         for imageFilename, imgDesc in self.images.items():
+            print("image:%s => %d" % (imageFilename, self.objectCount + 1))
             self.images[imageFilename]["fontObjectReference"] = \
                 self.objectCount + 1
 
@@ -593,35 +599,38 @@ class PaPDF:
             for extraInfo in imgDesc["extraInfos"]:
                 self._bufferAppend(extraInfo);
 
-            extraObjectCount = self.objectCount + 1
-            for extraObjectKey, extraObjectValue in imgDesc["extraObjects"].items():
-                self._bufferAppend("/%s %d 0 R" \
-                    % (extraObjectKey, extraObjectCount))
-                extraObjectCount += 1
+            if "extraObjects" in imgDesc and len(imgDesc["extraObjects"])>0:
+                extraObjectCount = self.objectCount + 1
+                for extraObjectKey, extraObjectValue \
+                    in imgDesc["extraObjects"].items():
+
+                    self._bufferAppend("/%s %d 0 R" \
+                        % (extraObjectKey, extraObjectCount))
+                    extraObjectCount += 1
 
 
-            # todo: put more params defined by PDF (bits per channels, ...)
             self._bufferAppend("/Length %d>>" % len(imgDesc["data"]))
             self._bufferAppend('stream')
             self._bufferAppend(imgDesc["data"])
             self._bufferAppend('endstream')
             self._bufferAppend("endobj")
 
-            for extraObjectKey, extraObjectValue in imgDesc["extraObjects"].items():
-                self._addNewObject()
-                self._bufferAppend("<<", endLine="")
+            if "extraObjects" in imgDesc and len(imgDesc["extraObjects"])>0:
+                for extraObjectKey, extraObjectValue in imgDesc["extraObjects"].items():
+                    self._addNewObject()
+                    self._bufferAppend("<<", endLine="")
 
-                for i,line in enumerate(extraObjectValue["Keys"]):
-                    if i == len(extraObjectValue["Keys"]) - 1:
-                        self._bufferAppend(line, endLine="")
-                    else:
-                        self._bufferAppend(line)
+                    for i,line in enumerate(extraObjectValue["Keys"]):
+                        if i == len(extraObjectValue["Keys"]) - 1:
+                            self._bufferAppend(line, endLine="")
+                        else:
+                            self._bufferAppend(line)
 
-                self._bufferAppend(">>")
-                self._bufferAppend('stream')
-                self._bufferAppend(extraObjectValue["Stream"])
-                self._bufferAppend('endstream')
-                self._bufferAppend("endobj")
+                    self._bufferAppend(">>")
+                    self._bufferAppend('stream')
+                    self._bufferAppend(extraObjectValue["Stream"])
+                    self._bufferAppend('endstream')
+                    self._bufferAppend("endobj")
 
     def _addTrueTypeFonts(self):
         """
@@ -863,8 +872,12 @@ class PaPDF:
         self._bufferAppend("/XObject <<")
 
         # Adding the images:
+        imageIdToFontRef = {}
         for _, imgDesc in self.images.items():
-            self._bufferAppend('/I%d %d 0 R' % (imgDesc["imageId"], imgDesc["fontObjectReference"]))
+            imageIdToFontRef[imgDesc["imageId"]] = \
+            imgDesc["fontObjectReference"]
+        for id, ref in imageIdToFontRef.items():
+            self._bufferAppend("/I%d %d 0 R" % (id, ref))
 
         self._bufferAppend(">>")
         self._bufferAppend(">>")
