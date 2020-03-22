@@ -18,7 +18,7 @@ class PaPDF:
         "LEGAL": [215.9, 355.6]
     }
     PROGRAM_NAME = "PaPDF v.0.1"
-    PDF_VERSION = "1.3"
+    PDF_VERSION = "1.4"
     MM_TO_DPI = 72 / 25.4;
     def __init__(self, filename, pageFormat="A4", title=""):
         if sys.version_info < (3, 4):
@@ -34,7 +34,7 @@ class PaPDF:
         self.fill_color="%.3f %.3f %.3f RG" % (r/255.0,g/255.0,b/255.0)
 
         # Compress the text commands (can be turned off for debug purposes)
-        self.compress = False
+        self.compress = True
 
         try:
             self.w_mm, self.h_mm = PaPDF.PAGE_FORMATS[upper(pageFormat)]
@@ -413,7 +413,7 @@ class PaPDF:
                     "extraObjects": extraObjects,
                 }
         output = ""
-        output += "q %.2f 0 0 %.2f %.2f %.2f cm /I%d Do Q" \
+        output += "q %.2f 0 0 %.2f %.2f %.2f cm /I%d Do Q\n" \
         % (width * PaPDF.MM_TO_DPI,
             height * PaPDF.MM_TO_DPI,
             x * PaPDF.MM_TO_DPI,
@@ -581,13 +581,11 @@ class PaPDF:
             self.fontSize = fontSize
 
     def _addImageStreams(self):
-        print("self.images=", len(self.images))
         filter = ""
         if self.compress:
             filter = "/Filter /FlateDecode "
 
         for imageFilename, imgDesc in self.images.items():
-            print("image:%s => %d" % (imageFilename, self.objectCount + 1))
             self.images[imageFilename]["fontObjectReference"] = \
                 self.objectCount + 1
 
