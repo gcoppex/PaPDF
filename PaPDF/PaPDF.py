@@ -136,6 +136,16 @@ class PaPDF:
         self.close();
         return isinstance(exc_value, TypeError)
 
+    def addPar(self, x, y, lines):
+        """
+        Adds a sequence of lines (aka a paragraph), with a 135% font height
+        text leading.
+        """
+        height = y
+        for l in lines.split("\n"):
+            self.addText(x, height, l)
+            height -= self.fontSize * 1.35 / PaPDF.MM_TO_DPI
+
     def addText(self, x, y, text):
         """
         Add a single line text at positin (x,y). The coordinates system are in
