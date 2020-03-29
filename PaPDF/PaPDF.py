@@ -729,29 +729,29 @@ class PaPDF:
             # Magic dictionary to encode the glyphs in unicode, taken and
             # simplified from Example 5.16 in the PDF standard
             self._addNewObject()
-            toUnicodeStream = """/CIDInit /ProcSet findresource begin
-                12 dict begin
-                begincmap
-                /CIDSystemInfo
-                <</Registry (Adobe)
-                /Ordering (UCS)
-                /Supplement 0
-                >> def
-                /CMapName /Adobe−Identity−UCS def
-                /CMapType 2  def
-                1 beginbfrange
-                <0000> <FFFF> <0000>
-                endbfrange
-                1 begincodespacerange
-                <0000> <FFFF>
-                endcodespacerange
-                1 beginbfchar
-                <0000> <FFFF>
-                endbfchar
-                endcmap
-                CMapName currentdict /CMap defineresource pop
-                end
-                end"""
+            toUnicodeStream = "/CIDInit /ProcSet findresource begin\n" \
+                + "12 dict begin\n" \
+                + "begincmap\n" \
+                + "/CIDSystemInfo\n" \
+                + "<</Registry (Adobe)\n" \
+                + "/Ordering (UCS)\n" \
+                + "/Supplement 0\n" \
+                + ">> def\n" \
+                + "/CMapName /Adobe-Identity-UCS def\n" \
+                + "/CMapType 2  def\n" \
+                + "1 beginbfrange\n" \
+                + "<0000> <FFFF> <0000>\n" \
+                + "endbfrange\n" \
+                + "1 begincodespacerange\n" \
+                + "<0000> <FFFF>\n" \
+                + "endcodespacerange\n" \
+                + "1 beginbfchar\n" \
+                + "<0000> <FFFF>\n" \
+                + "endbfchar\n" \
+                + "endcmap\n" \
+                + "CMapName currentdict /CMap defineresource pop\n" \
+                + "end\n" \
+                + "end"
 
             filter = ""
             if self.compress:
