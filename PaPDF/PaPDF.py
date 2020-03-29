@@ -142,7 +142,7 @@ class PaPDF:
         millimeters and the origin is the bottom left corner of the page.
         """
         # Basic text escaping and converting to UTF-16BE (big-endian) encoding
-        text = text.encode().decode("Latin-1")
+        text = text.encode("UTF-16BE").decode("Latin-1")
         currFont = self.fonts[self.currentFontName]
         pdfFontId = currFont["fontId"] + 1 # PDF font indices start at 1
 
