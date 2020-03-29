@@ -17,7 +17,7 @@ class PaPDF:
         "LETTER": [215.9, 279.4],
         "LEGAL": [215.9, 355.6]
     }
-    PROGRAM_NAME = "PaPDF v.0.1"
+    PROGRAM_NAME = "PaPDF v.1.1.3"
     PDF_VERSION = "1.4"
     MM_TO_DPI = 72 / 25.4;
     def __init__(self, filename, pageFormat="A4", title=""):
