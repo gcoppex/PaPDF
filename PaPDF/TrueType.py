@@ -455,7 +455,7 @@ class TrueTypeParser:
                         flags = byteStream.readBytes(2)
                         glyphIndex = byteStream.readBytes(2)
                         # If arguments are words, we skip 4 bytes else 2:
-                        seekOffset = 84 if (flags & 0x0001) else 2
+                        seekOffset = 4 if (flags & 0x0001) else 2
                         f.seek(seekOffset, os.SEEK_CUR)
 
                         # Depending on  the scale, we skip 2, 4 or 8 bytes
