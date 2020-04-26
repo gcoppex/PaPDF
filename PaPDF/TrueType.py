@@ -73,8 +73,265 @@ class TrueTypeParser:
     # Reference: https://developer.apple.com/fonts/TrueType-Reference-Manual/
 
     def __init__(self, fileName):
-        self.fileName = fileName;
-        self.embeddingData = None;
+        self.fileName = fileName
+        self.embeddingData = None
+
+        self.glyphsWidth = None # Buffer for the getTextWidth funciton to avoid
+        # reopening the TTF file at each call.
+
+        self.charToGlyph = None
+        self.glyphToChar = None
+        self.maxChar = None
+        # Buffer for the _getCharMappings function, to avoid reopening the TTF
+        # file.
+
+    def _getGlyphsWidth(self):
+        if self.glyphsWidth is None:
+            with open(self.fileName, "rb") as f:
+                byteStream = ByteStream(f)
+                tables = self._readTables(byteStream);
+
+                f.seek(tables["head"]["offset"])
+                f.seek(18, os.SEEK_CUR)
+
+                unitsPerEm = byteStream.readBytes(2)
+                f.seek(tables["hhea"]["offset"])
+                f.seek(34, os.SEEK_CUR)
+                numOfLongHorMetrics = byteStream.readBytes(2)
+
+                f.seek(tables["hmtx"]["offset"])
+                defaultCharWidth = byteStream.readBytes(2) * 1000 \
+                    // float(unitsPerEm)
+                _ = byteStream.readBytes(2)
+
+                glyphsWidth = {}
+                for glyphId in range(1, numOfLongHorMetrics):
+                    advanceWidth = byteStream.readBytes(2)
+                    leftSideBearing = byteStream.readBytes(2)
+                    glyphsWidth[glyphId] = advanceWidth / unitsPerEm
+                self.glyphsWidth = glyphsWidth
+        return self.glyphsWidth
+
+    def getTextWidth(self, text, fontSize):
+        charToGlyph, glyphToChar, maxChar = self._getCharMappings()
+        glyphsWidth = self._getGlyphsWidth()
+        charSubset = list(text)
+        widths = []
+        for currChar in charSubset:
+            currCharOrd = ord(currChar)
+            if currCharOrd in charToGlyph:
+                glyphId = charToGlyph[currCharOrd]
+                if glyphId in glyphsWidth:
+                    widths.append(glyphsWidth[glyphId])
+                else:
+                    print("Warning: the glyph width was not found in the " \
+                        +"font file")
+            else:
+                print("Warning: the given character (" + currChar + ") was " \
+                    + "not found in the font file ")
+
+        return sum(widths) * fontSize / 72.0 * 25.4
+    def _readTables(self, byteStream):
+        # Reading the offset subtable:
+        # uint16 	numTables 	    number of tables
+        # uint16 	searchRange 	(maximum power of 2 <= numTables)*16
+        # uint16 	entrySelector 	log2(maximum power of 2 <= numTables)
+        # uint16 	rangeShift    	numTables*16-searchRange
+        tables = {}
+        byteStream.fileObject.seek(4); # making sure the cursor is consistent
+        numTables = byteStream.readBytes(2)
+        searchRange = byteStream.readBytes(2)
+        entrySelector = byteStream.readBytes(2)
+        rangeShift = byteStream.readBytes(2)
+
+        for i in range(numTables):
+        #  Reading each table directory:
+        # uint32 	tag 	    4-byte identifier
+        # uint32 	checkSum 	checksum for this table
+        # uint32 	offset 	    offset from beginning of sfnt
+        # uint32 	length   	length of this table in byte (actual
+        #                       length not padded length)
+            tag = byteStream.readString(4)
+            record = {}
+            record['checksum'] = (byteStream.readBytes(2),
+                byteStream.readBytes(2))
+            record['offset'] = byteStream.readBytes(4)
+            record['length'] = byteStream.readBytes(4)
+            tables[tag] = record
+        return tables
+
+    def _getCharMappings(self):
+        if self.charToGlyph is None or self.glyphToChar is None \
+            or self.maxChar is None:
+
+            with open(self.fileName, "rb") as f:
+                byteStream = ByteStream(f)
+                tables = self._readTables(byteStream);
+
+                charToGlyph = {}
+                glyphToChar = {}
+                maxChar = 0
+
+                byteStream = ByteStream(f)
+
+                # Consuming the cmap table:
+                f.seek(tables["cmap"]["offset"])
+                cmapTableVersion = byteStream.readBytes(2)
+                if cmapTableVersion != 0:
+                    raise Exception("Bad TrueType cmapTableVersion in the cmap " \
+                        + "table: cmapTableVersion = %d (and should be 0)" \
+                        % cmapTableVersion)
+                cmapTablesQuantity = byteStream.readBytes(2)
+
+                # Parsing each cmap encoding subtable:
+                # Defining two local variable constants to avoid implicit errors in
+                # case of a future extension of this library with more CMAP formats.
+                CMAP_ENCODING_FORMAT_4 = "CMAP_ENCODING_FORMAT_4"
+                CMAP_ENCODING_FORMAT_12 = "CMAP_ENCODING_FORMAT_12"
+                cmapFormatCandidats = {
+                    CMAP_ENCODING_FORMAT_4 : [],
+                    CMAP_ENCODING_FORMAT_12 : [],
+                }
+                for cmapSubtableId in range(cmapTablesQuantity):
+                    platformID = byteStream.readBytes(2)
+                    platformSpecificID = byteStream.readBytes(2)
+                    offset = byteStream.readBytes(4)
+
+                    currOffset = f.seek(0, os.SEEK_CUR)
+                    f.seek(tables["cmap"]["offset"] + offset)
+                    cmapFormat = byteStream.readBytes(2);
+                    f.seek(currOffset);
+                    # 'cmap' Platforms
+                    # 0 	Unicode 	Indicates Unicode version.
+                    # 1 	Macintosh 	Script Manager code.
+                    # 2 	(reserved; do not use)
+                    # 3 	Microsoft 	Microsoft encoding.
+                    if platformID not in [0,1,3]:
+                        continue
+                        # platformID values other than 0, 1, or 3 are allowed but
+                        # cmaps using them will be ignored.
+
+                    encoding = None
+                    if platformID == 0: # Unicode
+                        # Unicode Platform-specific Encoding Identifiers
+                        # 0 	Default semantics
+                        # 1 	Version 1.1 semantics
+                        # 2 	ISO 10646 1993 semantics (deprecated)
+                        # 3 	Unicode 2.0 or later semantics (BMP only)
+                        # 4 	Unicode 2.0 or later semantics (non-BMP characters
+                        #           allowed)
+                        # 5 	Unicode Variation Sequences
+                        # 6 	Full Unicode coverage (used with type 13.0 cmaps by
+                        #           OpenType)
+                        if cmapFormat == 4:
+                            cmapFormatCandidats[CMAP_ENCODING_FORMAT_4] \
+                                .append(tables["cmap"]["offset"] + offset)
+                    elif platformID == 1: # Macintosh
+                        pass
+                    elif platformID == 3: # Windows
+                        # Windows Platform-specific Encoding Identifiers
+                        # 0 	Symbol
+                        # 1 	Unicode BMP-only (UCS-2)
+                        # 2 	Shift-JIS
+                        # 3 	PRC
+                        # 4 	BigFive
+                        # 5 	Johab
+                        # 10 	Unicode UCS-4
+                        if platformSpecificID == 1 and cmapFormat == 4:
+                            cmapFormatCandidats[CMAP_ENCODING_FORMAT_4] \
+                                .append(tables["cmap"]["offset"] + offset)
+                        elif platformSpecificID == 10 and cmapFormat == 4:
+                            cmapFormatCandidats[CMAP_ENCODING_FORMAT_12] \
+                                .append(tables["cmap"]["offset"] + offset)
+
+                if len(cmapFormatCandidats[CMAP_ENCODING_FORMAT_12]) > 0:
+                    cmapFormatOffset = \
+                        cmapFormatCandidats[CMAP_ENCODING_FORMAT_12][0]
+                    f.seek(cmapFormatOffset)
+                    format = byteStream.read16Dot16FixedPointNumber()
+                    # According to the doc: Format number is set to 12, let's check:
+                    if format != 12.0:
+                        raise Exception("Wrong cmap format 12, format field")
+                    length = byteStream.readBytes(4)
+                    language = byteStream.readBytes(4)
+                    nGroups= byteStream.readBytes(4)
+                    for groupId in range(grpCount):
+                        startCharCode = byteStream.readBytes(4)
+                        endCharCode = byteStream.readBytes(4)
+                        startGlyphCode = byteStream.readBytes(4)
+                        for charId in range(startCharCode, endCharCode + 1):
+                            charToGlyph[charId] = startGlyphCode \
+                                + (charId-startCharCode)
+                            if charId> maxChar and charId < 0x30000:
+                                maxChar = charId
+                            if not glyph in glyphToChar:
+                                glyphToChar[glyph] = []
+                            glyphToChar[glyph].append(currChar)
+                elif len(cmapFormatCandidats[CMAP_ENCODING_FORMAT_4]) > 0:
+                    cmapFormatOffset = \
+                        cmapFormatCandidats[CMAP_ENCODING_FORMAT_4][0]
+                    f.seek(cmapFormatOffset)
+                    format = byteStream.readBytes(2)
+                    # According to the doc: Format number is set to 4, let's check:
+                    if format != 4:
+                        raise Exception("Wrong cmap format 4, format field")
+                    length = byteStream.readBytes(2)
+                    language = byteStream.readBytes(2)
+                    segCount = byteStream.readBytes(2) // 2
+                     # Skipping searchRange, entrySelector and rangeShift:
+                    f.seek(3*2, os.SEEK_CUR)
+
+                    endCode = []
+                    for i in range(segCount):
+                        endCode.append(byteStream.readBytes(2))
+
+                    reservedPad = byteStream.readBytes(2)
+                    # According to the doc: This value should be zero, let's check:
+                    if reservedPad != 0:
+                        raise Exception("Wrong cmap format 4, reservedPad field")
+
+                    startCode = []
+                    for i in range(segCount):
+                        startCode.append(byteStream.readBytes(2))
+
+                    idDelta = []
+                    for i in range(segCount):
+                        idDelta.append(byteStream.readBytes(2))
+
+                    idRangeOffsetStart = f.seek(0, os.SEEK_CUR)
+                    idRangeOffset = []
+                    for i in range(segCount):
+                        idRangeOffset.append(byteStream.readBytes(2))
+
+                    currOffset = f.seek(0, os.SEEK_CUR)
+                    for n in range(segCount):
+                        for currChar in range(startCode[n], endCode[n]+1):
+                            glyph = 0
+                            if idRangeOffset[n] == 0:
+                                glyph = 0xFFFF & (currChar + idDelta[n])
+                            else:
+                                offset = idRangeOffsetStart + 2 * n \
+                                    + (currChar - startCode[n]) * 2 \
+                                    + idRangeOffset[n]
+                                if offset < cmapFormatOffset + length:
+                                    f.seek(offset)
+                                    glyph = byteStream.readBytes(2);
+                                    if (glyph != 0):
+                                        glyph += idDelta[n] & 0xFFFF
+                            charToGlyph[currChar] = glyph
+                            if currChar> maxChar and currChar < 0x30000:
+                                maxChar = currChar
+                            if not glyph in glyphToChar:
+                                glyphToChar[glyph] = []
+                            glyphToChar[glyph].append(currChar)
+                    f.seek(currOffset);
+                else:
+                    raise Exception("Unable to find a supported CMAP encoding in " \
+                        + "the given font file. ")
+                self.charToGlyph = charToGlyph
+                self.glyphToChar = glyphToChar
+                self.maxChar = maxChar
+        return self.charToGlyph, self.glyphToChar, self.maxChar
 
     def getEmbeddingData(self, charSubset):
         # Return the font data used to embed the font in a PDF
@@ -100,31 +357,9 @@ class TrueTypeParser:
                     + "file (incorrect TrueType version detected - " + version \
                     + ")")
 
-            # Reading the offset subtable:
-            # uint16 	numTables 	    number of tables
-            # uint16 	searchRange 	(maximum power of 2 <= numTables)*16
-            # uint16 	entrySelector 	log2(maximum power of 2 <= numTables)
-            # uint16 	rangeShift    	numTables*16-searchRange
-            tables = {}
-            numTables = byteStream.readBytes(2)
-            searchRange = byteStream.readBytes(2)
-            entrySelector = byteStream.readBytes(2)
-            rangeShift = byteStream.readBytes(2)
+            tables = self._readTables(byteStream);
 
-            for i in range(numTables):
-                #  Reading each table directory:
-                # uint32 	tag 	    4-byte identifier
-                # uint32 	checkSum 	checksum for this table
-                # uint32 	offset 	    offset from beginning of sfnt
-                # uint32 	length   	length of this table in byte (actual
-                #                       length not padded length)
-                tag = byteStream.readString(4)
-                record = {}
-                record['checksum'] = (byteStream.readBytes(2),
-                    byteStream.readBytes(2))
-                record['offset'] = byteStream.readBytes(4)
-                record['length'] = byteStream.readBytes(4)
-                tables[tag] = record
+            f.seek(12 + len(tables) * 16) # making sure the cursor is consistent
 
             # Consuming the head table:
             f.seek(tables["head"]["offset"])
@@ -160,164 +395,8 @@ class TrueTypeParser:
             glyphDataFormat = byteStream.readBytes(2, unsigned=False)
 
 
-            # Consuming the cmap table:
-            f.seek(tables["cmap"]["offset"])
-            cmapTableVersion = byteStream.readBytes(2)
-            if cmapTableVersion != 0:
-                raise Exception("Bad TrueType cmapTableVersion in the cmap " \
-                    + "table: cmapTableVersion = %d (and should be 0)" \
-                    % cmapTableVersion)
-            cmapTablesQuantity = byteStream.readBytes(2)
-
-
-            # Parsing each cmap encoding subtable:
-            # Defining two local variable constants to avoid implicit errors in
-            # case of a future extension of this library with more CMAP formats.
-            CMAP_ENCODING_FORMAT_4 = "CMAP_ENCODING_FORMAT_4"
-            CMAP_ENCODING_FORMAT_12 = "CMAP_ENCODING_FORMAT_12"
-            cmapFormatCandidats = {
-                CMAP_ENCODING_FORMAT_4 : [],
-                CMAP_ENCODING_FORMAT_12 : [],
-            }
-            for cmapSubtableId in range(cmapTablesQuantity):
-                platformID = byteStream.readBytes(2)
-                platformSpecificID = byteStream.readBytes(2)
-                offset = byteStream.readBytes(4)
-
-                currOffset = f.seek(0, os.SEEK_CUR)
-                f.seek(tables["cmap"]["offset"] + offset)
-                cmapFormat = byteStream.readBytes(2);
-                f.seek(currOffset);
-                # 'cmap' Platforms
-                # 0 	Unicode 	Indicates Unicode version.
-                # 1 	Macintosh 	Script Manager code.
-                # 2 	(reserved; do not use)
-                # 3 	Microsoft 	Microsoft encoding.
-                if platformID not in [0,1,3]:
-                    continue
-                    # platformID values other than 0, 1, or 3 are allowed but
-                    # cmaps using them will be ignored.
-
-                encoding = None
-                if platformID == 0: # Unicode
-                    # Unicode Platform-specific Encoding Identifiers
-                    # 0 	Default semantics
-                    # 1 	Version 1.1 semantics
-                    # 2 	ISO 10646 1993 semantics (deprecated)
-                    # 3 	Unicode 2.0 or later semantics (BMP only)
-                    # 4 	Unicode 2.0 or later semantics (non-BMP characters
-                    #           allowed)
-                    # 5 	Unicode Variation Sequences
-                    # 6 	Full Unicode coverage (used with type 13.0 cmaps by
-                    #           OpenType)
-                    if cmapFormat == 4:
-                        cmapFormatCandidats[CMAP_ENCODING_FORMAT_4] \
-                            .append(tables["cmap"]["offset"] + offset)
-                elif platformID == 1: # Macintosh
-                    pass
-                elif platformID == 3: # Windows
-                    # Windows Platform-specific Encoding Identifiers
-                    # 0 	Symbol
-                    # 1 	Unicode BMP-only (UCS-2)
-                    # 2 	Shift-JIS
-                    # 3 	PRC
-                    # 4 	BigFive
-                    # 5 	Johab
-                    # 10 	Unicode UCS-4
-                    if platformSpecificID == 1 and cmapFormat == 4:
-                        cmapFormatCandidats[CMAP_ENCODING_FORMAT_4] \
-                            .append(tables["cmap"]["offset"] + offset)
-                    elif platformSpecificID == 10 and cmapFormat == 4:
-                        cmapFormatCandidats[CMAP_ENCODING_FORMAT_12] \
-                            .append(tables["cmap"]["offset"] + offset)
-
-            charToGlyph = {}
-            glyphToChar = {}
-            maxChar = 0
-            if len(cmapFormatCandidats[CMAP_ENCODING_FORMAT_12]) > 0:
-                cmapFormatOffset = \
-                    cmapFormatCandidats[CMAP_ENCODING_FORMAT_12][0]
-                self.seek(cmapFormatOffset)
-                format = byteStream.read16Dot16FixedPointNumber()
-                # According to the doc: Format number is set to 12, let's check:
-                if format != 12.0:
-                    raise Exception("Wrong cmap format 12, format field")
-                length = byteStream.readBytes(4)
-                language = byteStream.readBytes(4)
-                nGroups= byteStream.readBytes(4)
-                for groupId in range(grpCount):
-                    startCharCode = byteStream.readBytes(4)
-                    endCharCode = byteStream.readBytes(4)
-                    startGlyphCode = byteStream.readBytes(4)
-                    for charId in range(startCharCode, endCharCode + 1):
-                        charToGlyph[charId] = startGlyphCode \
-                            + (charId-startCharCode)
-                        if charId> maxChar and charId < 0x30000:
-                            maxChar = charId
-                        if not glyph in glyphToChar:
-                            glyphToChar[glyph] = []
-                        glyphToChar[glyph].append(currChar)
-            elif len(cmapFormatCandidats[CMAP_ENCODING_FORMAT_4]) > 0:
-                cmapFormatOffset = \
-                    cmapFormatCandidats[CMAP_ENCODING_FORMAT_4][0]
-                f.seek(cmapFormatOffset)
-                format = byteStream.readBytes(2)
-                # According to the doc: Format number is set to 4, let's check:
-                if format != 4:
-                    raise Exception("Wrong cmap format 4, format field")
-                length = byteStream.readBytes(2)
-                language = byteStream.readBytes(2)
-                segCount = byteStream.readBytes(2) // 2
-                 # Skipping searchRange, entrySelector and rangeShift:
-                f.seek(3*2, os.SEEK_CUR)
-
-                endCode = []
-                for i in range(segCount):
-                    endCode.append(byteStream.readBytes(2))
-
-                reservedPad = byteStream.readBytes(2)
-                # According to the doc: This value should be zero, let's check:
-                if reservedPad != 0:
-                    raise Exception("Wrong cmap format 4, reservedPad field")
-
-                startCode = []
-                for i in range(segCount):
-                    startCode.append(byteStream.readBytes(2))
-
-                idDelta = []
-                for i in range(segCount):
-                    idDelta.append(byteStream.readBytes(2))
-
-                idRangeOffsetStart = f.seek(0, os.SEEK_CUR)
-                idRangeOffset = []
-                for i in range(segCount):
-                    idRangeOffset.append(byteStream.readBytes(2))
-
-                currOffset = f.seek(0, os.SEEK_CUR)
-                for n in range(segCount):
-                    for currChar in range(startCode[n], endCode[n]+1):
-                        glyph = 0
-                        if idRangeOffset[n] == 0:
-                            glyph = 0xFFFF & (currChar + idDelta[n])
-                        else:
-                            offset = idRangeOffsetStart + 2 * n \
-                                + (currChar - startCode[n]) * 2 \
-                                + idRangeOffset[n]
-                            if offset < cmapFormatOffset + length:
-                                f.seek(offset)
-                                glyph = byteStream.readBytes(2);
-                                if (glyph != 0):
-                                    glyph += idDelta[n] & 0xFFFF
-                        charToGlyph[currChar] = glyph
-                        if currChar> maxChar and currChar < 0x30000:
-                            maxChar = currChar
-                        if not glyph in glyphToChar:
-                            glyphToChar[glyph] = []
-                        glyphToChar[glyph].append(currChar)
-                f.seek(currOffset);
-            else:
-                raise Exception("Unable to find a supported CMAP encoding in " \
-                    + "the given font file. ")
+            charToGlyph, glyphToChar, maxChar = \
+                self._getCharMappings()
 
             # Consuming the hhea table:
             f.seek(tables["hhea"]["offset"])
@@ -393,7 +472,6 @@ class TrueTypeParser:
                     if(charId>0 and charId<0xFFFF):
                         currCharWidth = int(round(
                             advanceWidth * 1000 // float(unitsPerEm)))
-
                         if currCharWidth == 0:
                             currCharWidth = 65535
                         if charId < 0x30000:
@@ -587,7 +665,7 @@ class TrueTypeParser:
 
             glyphToIndex = {}
             for id, (char, glyph) in enumerate(sortedSubsetCharToGlyph):
-                glyphToIndex[glyph] = id + 1 # + 1 to count the (0.0)
+                glyphToIndex[glyph] = id + 1 # + 1 to count the (0,0)
                     # first element of sortedSubsetCharToGlyph
 
             # Artificially adding a (0,0) char/glyph tuple, for code simplicity:
@@ -628,7 +706,6 @@ class TrueTypeParser:
                                     if (flags & 0x0080) else 0
                 else:
                     currGlyphData = b''
-
 
                 # Adding padding:
                 if len(currGlyphData)%4!=0:

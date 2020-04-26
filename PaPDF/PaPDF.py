@@ -57,6 +57,7 @@ class PaPDF:
             "fontObjectReference":-1,
             "usedCharacters": set(),
         }
+        self.fontsWidths = {} # Widths of each char, of each font
         self.currentFontName = "Helvetica"
         self.fontSize = 10
         self.lineThickness = 1 * PaPDF.MM_TO_DPI
@@ -146,11 +147,17 @@ class PaPDF:
             self.addText(x, height, l)
             height -= self.fontSize * 1.35 / PaPDF.MM_TO_DPI
 
-    def addText(self, x, y, text):
+    def addText(self, x, y, text, maxLength=-1):
         """
         Add a single line text at positin (x,y). The coordinates system are in
         millimeters and the origin is the bottom left corner of the page.
+
+        The optional argument `maxLength` sets the bounding maximum width, if
+        the text exceeds this amount of mm, the rest of the text is split and
+        displayed on a next line. The number of added text lines is returned by
+        this function.
         """
+
         # Basic text escaping and converting to UTF-16BE (big-endian) encoding
         text = text.encode("UTF-16BE").decode("Latin-1")
         currFont = self.fonts[self.currentFontName]
@@ -160,16 +167,29 @@ class PaPDF:
         newChars = [ord(c) for c in set(text) if ord(c) != 0]
         currFont["usedCharacters"] = currFont["usedCharacters"].union(newChars)
 
+        if maxLength>0:
+            if self.currentFontName not in self.fontsWidths:
+                fontFileName = self.fonts[self.currentFontName]["fileName"]
+                ttp = TrueType.TrueTypeParser(fontFileName)
+                self.fontsWidths[self.currentFontName] = ttp.getCharsWidth()
+
+            #lineLength = sum([ord(c) for c in set(text) if ord(c) != 0])
         # Adding the pdf text commands to the PDF buffer:
         text = text.replace("\\","\\\\").replace(")","\\)") \
             .replace("(","\\(").replace("\r","\\r")
         output = ""
         output += "2 J" + "\n"
         output += "BT /F%d %.2f Tf ET" % (pdfFontId, self.fontSize) + "\n"
+
         output += ("BT %.2f %.2f Td (%s) Tj ET" \
             % (x * PaPDF.MM_TO_DPI, y * PaPDF.MM_TO_DPI, text)) + "\n"
+
         self.pageStream += output.encode("Latin-1")
 
+    def getTextWidth(self, text):
+        ttp = TrueType.TrueTypeParser(self.fonts[self.currentFontName] \
+                                                ["fileName"])
+        return ttp.getTextWidth(text, self.fontSize)
 
     def addLine(self, x0, y0, x1, y1):
         """
@@ -589,6 +609,9 @@ class PaPDF:
         self.currentFontName = fontName
         if fontSize >=0 :
             self.fontSize = fontSize
+
+    def setFontSize(self, fontSize=-1):
+        self.fontSize = fontSize
 
     def _addImageStreams(self):
         filter = ""
