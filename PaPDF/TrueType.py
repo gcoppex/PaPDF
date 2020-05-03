@@ -119,6 +119,8 @@ class TrueTypeParser:
         widths = []
         for currChar in charSubset:
             currCharOrd = ord(currChar)
+            if currCharOrd < 1:
+                continue
             if currCharOrd in charToGlyph:
                 glyphId = charToGlyph[currCharOrd]
                 if glyphId in glyphsWidth:
@@ -127,7 +129,8 @@ class TrueTypeParser:
                     print("Warning: the glyph width was not found in the " \
                         +"font file")
             else:
-                print("Warning: the given character (" + currChar + ") was " \
+                print("Warning: the given character (" + currChar \
+                    + "/" + str(ord(currChar)) + ") was " \
                     + "not found in the font file ")
 
         return sum(widths) * fontSize / 72.0 * 25.4

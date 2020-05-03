@@ -24,6 +24,10 @@ def main():
         w = pdf.getTextWidth(text)
         pdf.addLine(20, 158.5, 20+w, 158.5)
 
+
+        pdf.setFontSize(14);
+        pdf.addText(20, 140, text, 50)
+
 # Note that Source Sans Pro font is distibuted under the SIL Open Font License,
 # Version 1.1. The license is not copied below, but is available with a FAQ at:
 # http://scripts.sil.org/OFL

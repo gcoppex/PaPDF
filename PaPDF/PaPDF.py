@@ -1,4 +1,4 @@
-import os, sys, io, zlib
+import os, sys, io, zlib, math
 from datetime import datetime
 import collections
 import struct
@@ -53,11 +53,11 @@ class PaPDF:
         self.fonts["Helvetica"] = {
             "fontId": 0,
             "fontType": "Embedded",
-            "fileName": "<unused>",
+            "fileName": None,
             "fontObjectReference":-1,
             "usedCharacters": set(),
+            "trueTypeParser": None,
         }
-        self.fontsWidths = {} # Widths of each char, of each font
         self.currentFontName = "Helvetica"
         self.fontSize = 10
         self.lineThickness = 1 * PaPDF.MM_TO_DPI
@@ -157,7 +157,6 @@ class PaPDF:
         displayed on a next line. The number of added text lines is returned by
         this function.
         """
-
         # Basic text escaping and converting to UTF-16BE (big-endian) encoding
         text = text.encode("UTF-16BE").decode("Latin-1")
         currFont = self.fonts[self.currentFontName]
@@ -167,11 +166,6 @@ class PaPDF:
         newChars = [ord(c) for c in set(text) if ord(c) != 0]
         currFont["usedCharacters"] = currFont["usedCharacters"].union(newChars)
 
-        if maxLength>0:
-            if self.currentFontName not in self.fontsWidths:
-                fontFileName = self.fonts[self.currentFontName]["fileName"]
-                ttp = TrueType.TrueTypeParser(fontFileName)
-                self.fontsWidths[self.currentFontName] = ttp.getCharsWidth()
 
             #lineLength = sum([ord(c) for c in set(text) if ord(c) != 0])
         # Adding the pdf text commands to the PDF buffer:
@@ -179,16 +173,43 @@ class PaPDF:
             .replace("(","\\(").replace("\r","\\r")
         output = ""
         output += "2 J" + "\n"
-        output += "BT /F%d %.2f Tf ET" % (pdfFontId, self.fontSize) + "\n"
+        output += "BT /F%d %.2f Tf ET\n" % (pdfFontId, self.fontSize)
 
-        output += ("BT %.2f %.2f Td (%s) Tj ET" \
-            % (x * PaPDF.MM_TO_DPI, y * PaPDF.MM_TO_DPI, text)) + "\n"
+        print("addint text=", text)
+        textSplits = []
+        textLen = self.getTextWidth(text)
+        if maxLength>0 and textLen>maxLength:
+            for i in range(math.ceil(maxLength/textLen)):
+                textSplits.append(text[i*maxLength: min((i+1)*maxLength,textLen)])
+                print("chunk:", i*maxLength, min((i+1)*maxLength,textLen))
+        else:
+            textSplits.append(text)
+
+        for split in textSplits:
+            print("split=", split)
+            output += "BT %.2f %.2f Td (%s) Tj ET\n" \
+                % (x * PaPDF.MM_TO_DPI, y * PaPDF.MM_TO_DPI, text)
 
         self.pageStream += output.encode("Latin-1")
 
+        return len(textSplits)
+
+    def _getHelveticaTextWidth(self, text):
+        return 0
+
     def getTextWidth(self, text):
-        ttp = TrueType.TrueTypeParser(self.fonts[self.currentFontName] \
-                                                ["fileName"])
+        """
+        Returns the text width (in mm) given the current font settings.
+        """
+        if self.currentFontName == "Helvetica":
+            return self._getHelveticaTextWidth(text)
+
+        if self.fonts[self.currentFontName]["trueTypeParser"] is None:
+            # Caching the TrueTypeParser object for future use.
+            self.fonts[self.currentFontName]["trueTypeParser"] = \
+                TrueType.TrueTypeParser(self.fonts[self.currentFontName] \
+                ["fileName"])
+        ttp = self.fonts[self.currentFontName]["trueTypeParser"]
         return ttp.getTextWidth(text, self.fontSize)
 
     def addLine(self, x0, y0, x1, y1):
@@ -604,6 +625,7 @@ class PaPDF:
             "fileName": fileName,
             "fontObjectReference": fontObjectReference,
             "usedCharacters": set(range(1,32)),
+            "trueTypeParser": None,
         }
     def setFont(self, fontName, fontSize=-1):
         self.currentFontName = fontName
