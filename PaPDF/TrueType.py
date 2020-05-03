@@ -112,6 +112,18 @@ class TrueTypeParser:
                 self.glyphsWidth = glyphsWidth
         return self.glyphsWidth
 
+    def getLetterWitdh(self):
+        charToGlyph, glyphToChar, maxChar = self._getCharMappings()
+        glyphsWidth = self._getGlyphsWidth()
+
+        ordToWidth = {}
+        for char,glyphId in charToGlyph.items():
+            if glyphId in glyphsWidth and char<300:
+                ordToWidth[char] = glyphsWidth[glyphId]
+        return ordToWidth
+
+
+
     def getTextWidth(self, text, fontSize):
         charToGlyph, glyphToChar, maxChar = self._getCharMappings()
         glyphsWidth = self._getGlyphsWidth()
