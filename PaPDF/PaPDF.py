@@ -147,7 +147,7 @@ class PaPDF:
             self.addText(x, height, l)
             height -= self.fontSize * 1.35 / PaPDF.MM_TO_DPI
 
-    def addText(self, x, y, text, maxLength=-1):
+    def addText(self, x, y, multiLineText, maxLength=-1):
         """
         Add a single line text at positin (x,y). The coordinates system are in
         millimeters and the origin is the bottom left corner of the page.
@@ -163,7 +163,7 @@ class PaPDF:
         pdfFontId = currFont["fontId"] + 1 # PDF font indices start at 1
 
         # Update of the uniquely used characters, by the currFont font:
-        newChars = [ord(c) for c in set(text) if ord(c) != 0]
+        newChars = [ord(c) for c in set(multiLineText) if ord(c) != 0]
         currFont["usedCharacters"] = currFont["usedCharacters"].union(newChars)
 
 
@@ -172,23 +172,25 @@ class PaPDF:
         output += "BT /F%d %.2f Tf ET\n" % (pdfFontId, self.fontSize)
 
         textSplits = []
-        textLen = self.getTextWidth(text)
-        if maxLength>0 and textLen>maxLength:
-            currLine = None
-            for word in text.split(" "):
+        for text in multiLineText.split("\n"):
+            text = text.strip()
+            textLen = self.getTextWidth(text)
+            if maxLength>0 and textLen>maxLength:
+                currLine = None
+                for word in text.split(" "):
+                    if currLine is not None:
+                        potCurrLine = "%s %s" % (currLine, word)
+                    else:
+                        potCurrLine = word
+                    if self.getTextWidth(potCurrLine)>maxLength:
+                        textSplits.append(currLine)
+                        currLine = word
+                    else:
+                        currLine = potCurrLine
                 if currLine is not None:
-                    potCurrLine = "%s %s" % (currLine, word)
-                else:
-                    potCurrLine = word
-                if self.getTextWidth(potCurrLine)>maxLength:
                     textSplits.append(currLine)
-                    currLine = word
-                else:
-                    currLine = potCurrLine
-            if currLine is not None:
-                textSplits.append(currLine)
-        else:
-            textSplits.append(text)
+            else:
+                textSplits.append(text)
 
         currY = y
         for split in textSplits:
