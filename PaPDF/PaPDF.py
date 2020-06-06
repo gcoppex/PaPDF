@@ -272,6 +272,33 @@ class PaPDF:
             y1 * PaPDF.MM_TO_DPI)
         self.pageStream += output.encode("Latin-1")
 
+    def addPath(self, points, fill=False, close=True):
+        """
+        Given a list of points (a list of (x,y) millimeters coordinates tuples),
+        this function draws a path on the current page.
+        If (strictly) less than 2 points are given, nothing is done.
+        """
+        if len(points)<2:
+            return
+        points = [(x* PaPDF.MM_TO_DPI, y * PaPDF.MM_TO_DPI) for (x,y) in points]
+        output = "%d %d m\n" % points.pop(0)
+        for p in points:
+            output += "%d %d l\n" % p
+
+        output += "%d w\n" % self.lineThickness
+
+        output += "%s\n" % self.stroke_color
+        output += "%s\n" % self.fill_color
+
+        if fill:
+            output += "f "
+        if close:
+            output += "s" # s = h S : close and stroke
+        else:
+            output += "S" # only stroke
+        output +="\n"
+        self.pageStream += output.encode("Latin-1")
+
     def _decodeJPG(self, fileObject):
         # Helper function to parse a JPG fileobject and raise in case bad format
         # Source: https://www.disktuna.com/list-of-jpeg-markers/
