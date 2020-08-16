@@ -201,13 +201,14 @@ class PaPDF:
             else:
                 textSplits.append(text)
 
+        italicAngle = 0 # try 0.5
         currY = y
         for split in textSplits:
             split = split.encode("UTF-16BE").decode("Latin-1")\
                 .replace("\\","\\\\").replace(")","\\)") \
                 .replace("(","\\(").replace("\r","\\r")
-            output += "BT %s %.2f %.2f Td (%s) Tj ET\n" \
-                % (self.fill_color,\
+            output += "BT %s 1 0 %.2f 1 %.2f %.2f Tm (%s) Tj ET\n" \
+                % (self.fill_color, italicAngle, \
                     x * PaPDF.MM_TO_DPI, currY * PaPDF.MM_TO_DPI, \
                     split)
             currY -= self.fontSize * 1.35 / PaPDF.MM_TO_DPI
@@ -264,7 +265,7 @@ class PaPDF:
         Add a line from (x0,y0) to (x1,y1)
         """
         output = ""
-        output += "%.2f w 0 J\n" % (self.lineThickness * PaPDF.MM_TO_DPI)
+        output += "%.2f w\n %s\n 0 J\n" % (self.lineThickness * PaPDF.MM_TO_DPI, self.stroke_color)
         output += "%.2f %.2f m %.2f %.2f l S\n" \
             % (x0 * PaPDF.MM_TO_DPI,
             y0 * PaPDF.MM_TO_DPI,
