@@ -204,13 +204,19 @@ class PaPDF:
         italicAngle = 0 # try 0.5
         currY = y
         for split in textSplits:
-            split = split.encode("UTF-16BE").decode("Latin-1")\
+            split = split.encode("latin-1").decode("latin-1")\
                 .replace("\\","\\\\").replace(")","\\)") \
                 .replace("(","\\(").replace("\r","\\r")
-            output += "BT %s 1 0 %.2f 1 %.2f %.2f Tm (%s) Tj ET\n" \
-                % (self.fill_color, italicAngle, \
-                    x * PaPDF.MM_TO_DPI, currY * PaPDF.MM_TO_DPI, \
-                    split)
+
+            # TODO: support for italic text
+            #output += "BT %s 1 0 %.2f 1 %.2f %.2f Tm (%s) Tj ET\n" \
+            #    % (self.fill_color, italicAngle, \
+            #        x * PaPDF.MM_TO_DPI, currY * PaPDF.MM_TO_DPI, \
+            #        split)
+            output += "BT %s %.2f %.2f Td (%s) Tj ET\n" \
+                % (self.fill_color, \
+                   x * PaPDF.MM_TO_DPI, currY * PaPDF.MM_TO_DPI, split)
+
             currY -= self.fontSize * 1.35 / PaPDF.MM_TO_DPI
 
         self.pageStream += output.encode("Latin-1")
