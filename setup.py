@@ -9,7 +9,7 @@ with open(path.join(currDir, 'README.md'), encoding='utf-8') as f:
 
 setuptools.setup(
     name="PaPDF",
-    version="1.1.5",
+    version="1.1.6",
     author="GCoppex",
     author_email="g.coppex@gmail.com",
     description="A python package to create PDF files.",
