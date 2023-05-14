@@ -203,7 +203,7 @@ class PaPDF:
 
         italicAngle = 0 # try 0.5
         currY = y
-        for split in textSplits
+        for split in textSplits:
             split = split.encode("UTF-16BE").decode("Latin-1")\
                 .replace("\\","\\\\").replace(")","\\)") \
                 .replace("(","\\(").replace("\r","\\r")
