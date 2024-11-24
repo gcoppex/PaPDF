@@ -15,11 +15,14 @@ class PaPDF:
         "A4": [210.0, 297.0],
         "A5": [148.5, 210.0],
         "LETTER": [215.9, 279.4],
-        "LEGAL": [215.9, 355.6]
+        "LEGAL": [215.9, 355.6],
+        "LINKEDIN_CAROUSEL_SQUARE": [91.44, 91.44], # 1080x1080 @300DPI
+        "LINKEDIN_CAROUSEL_PORTRAIT": [91.44, 114.3], # 1080x1350 @300DPI
+        "LINKEDIN_CAROUSEL_LANDSCAPE": [108.37, 60.96] # 1280x720 @300DPI
     }
-    PROGRAM_NAME = "PaPDF v.1.1.3"
+    PROGRAM_NAME = "PaPDF v.1.1.9"
     PDF_VERSION = "1.4"
-    MM_TO_DPI = 72 / 25.4;
+    MM_TO_DPI = 72 / 25.4
     def __init__(self, filename, pageFormat="A4", title=""):
         if sys.version_info < (3, 4):
             raise Exception("python3.4 is (at least) required")
@@ -37,7 +40,7 @@ class PaPDF:
         self.compress = True
 
         try:
-            self.w_mm, self.h_mm = PaPDF.PAGE_FORMATS[upper(pageFormat)]
+            self.w_mm, self.h_mm = PaPDF.PAGE_FORMATS[pageFormat.upper()]
         except:
             self.w_mm, self.h_mm = PaPDF.PAGE_FORMATS["A4"]
 
@@ -60,7 +63,7 @@ class PaPDF:
         }
         self.currentFontName = "Helvetica"
         self.fontSize = 10
-        self.lineThickness = 1 * PaPDF.MM_TO_DPI
+        self.lineThickness = 1
 
         # Page related variables: the page id, the pageStream.
         self.pageId = -1
@@ -73,6 +76,7 @@ class PaPDF:
         # and the second object is the font reference table
         self.offsets = {}
         self.images = {}
+        self.shadingObjects = []
 
 
         self._bufferAppend("%PDF-"+self.PDF_VERSION)
@@ -143,7 +147,7 @@ class PaPDF:
         return self
 
     def __exit__(self,exc_type, exc_value, traceback):
-        self.close();
+        self.close()
         return isinstance(exc_value, TypeError)
 
     def addPar(self, x, y, lines):
@@ -363,7 +367,7 @@ class PaPDF:
             if not unsigned and (output & (1 << 8*numBytes-1)):
                 # Reversing the two's complement:
                 output -= (1 << 8*numBytes)
-            return output;
+            return output
 
         # parsing the the IHDR chunk:
         # The IHDR chunk must appear FIRST. It contains:
@@ -529,7 +533,7 @@ class PaPDF:
                         f.seek(0)
                         h, w, stream, extraInfos, extraObjects = func(f)
                         hasBeenEmbedded = True
-                        break;
+                        break
                     except Exception as e:
                         pass
             if not hasBeenEmbedded:
@@ -728,6 +732,76 @@ class PaPDF:
     def setFontSize(self, fontSize=-1):
         self.fontSize = fontSize
 
+    def addGradient(self, start2Coords, startColorHex, end2Coords, endColorHex):
+        def hex_to_color_array(hex_color):
+            hex_color = hex_color.lstrip('#')
+            if len(hex_color) != 6:
+                raise ValueError("HEX color must be in the format '#RRGGBB'")
+            r = int(hex_color[0:2], 16) / 255.0
+            g = int(hex_color[2:4], 16) / 255.0
+            b = int(hex_color[4:6], 16) / 255.0
+            return [r, g, b]
+
+        shadingObjectId = len(self.shadingObjects) + 1 # Starting id at 1
+        shadingObjectReference = -1 # Ccreated later, by _addShadingObjects()
+        self.shadingObjects.append({
+            "coords": [*start2Coords, *end2Coords],
+            "startColor": hex_to_color_array(startColorHex),
+            "endColor": hex_to_color_array(endColorHex),
+            "shadingObjectId": shadingObjectId,
+            "shadingObjectReference": shadingObjectReference
+        })
+        return shadingObjectId
+    def _addShadingObjects(self):
+        for shadingObject in self.shadingObjects:
+            self._addNewObject()
+            shadingObject["shadingObjectReference"] = self.objectCount
+
+            self._bufferAppend("<<")
+            self._bufferAppend("/ShadingType 2")
+            self._bufferAppend("/ColorSpace /DeviceRGB")
+            self._bufferAppend("/Coords [%s]" % \
+                (" ".join([str(x) for x in shadingObject["coords"]])))
+
+            self._bufferAppend("/Function")
+            self._bufferAppend("<<")
+            self._bufferAppend("/FunctionType 2")
+            self._bufferAppend("/Domain [0 1]")
+            self._bufferAppend("/C0 [%s]" % \
+                (" ".join([str(x) for x in shadingObject["startColor"]])))
+            self._bufferAppend("/C1 [%s]" % \
+                (" ".join([str(x) for x in shadingObject["endColor"]])))
+            self._bufferAppend("/N 1")
+            self._bufferAppend(">>")
+
+            self._bufferAppend("/Extend [true true]")
+            self._bufferAppend(">>")
+
+
+    def addGradientText(self, gradientId, coordinates, text):
+        currFont = self.fonts[self.currentFontName]
+        fontId = currFont["fontId"] + 1 # PDF font indices start at 1
+        fontId = 1
+
+        # Update of the uniquely used characters, by the currFont font:
+        newChars = [ord(c) for c in set(text) if ord(c) != 0]
+        currFont["usedCharacters"] = currFont["usedCharacters"].union(newChars)
+
+
+        output = ""
+        output += "q" + "\n"
+        output += "BT" + "\n"
+        output += "/F"+str(fontId)+" 36 Tf " + "\n"
+        output += "%s Td " % " ".join([str(x) for x in coordinates])+ "\n"
+        output += "4 Tr" + "\n"
+        #output += "1 0 0 1 10 10 Tm " + "\n"
+        output += "(%s) Tj" % text + "\n"
+        output += "ET" + "\n"
+        output += "/Sh"+str(gradientId)+" sh" + "\n"
+        output += "Q" + "\n"
+
+        self.pageStream += output.encode("Latin-1")
+
     def _addImageStreams(self):
         filter = ""
         if self.compress:
@@ -738,12 +812,12 @@ class PaPDF:
                 self.objectCount + 1
 
             self._addNewObject()
-            self._bufferAppend("<</Type /XObject");
-            self._bufferAppend("/Subtype /Image");
-            self._bufferAppend("/Width %d" % imgDesc["width"]);
-            self._bufferAppend("/Height %d" % imgDesc["height"]);
+            self._bufferAppend("<</Type /XObject")
+            self._bufferAppend("/Subtype /Image")
+            self._bufferAppend("/Width %d" % imgDesc["width"])
+            self._bufferAppend("/Height %d" % imgDesc["height"])
             for extraInfo in imgDesc["extraInfos"]:
-                self._bufferAppend(extraInfo);
+                self._bufferAppend(extraInfo)
 
             if "extraObjects" in imgDesc and len(imgDesc["extraObjects"])>0:
                 extraObjectCount = self.objectCount + 1
@@ -802,7 +876,7 @@ class PaPDF:
             while(offset < 2):
                 prefix = "A"+ prefix
                 offset += 1
-            prefix = "PAPF" + prefix
+            prefix = "PaPDF" + prefix
 
             prefixedFontName = "%s+%s" % (prefix, fontName)
 
@@ -831,10 +905,10 @@ class PaPDF:
             # reference to the CIDFontType2 (\DescendantFonts) but also the
             # encoding used (Identity-H - see PDF Reference, section 5.9)
             self._addNewObject()
-            self._bufferAppend("<</Type /Font");
-            self._bufferAppend("/Subtype /Type0");
-            self._bufferAppend("/BaseFont /" + prefixedFontName + "");
-            self._bufferAppend("/Encoding /Identity-H");
+            self._bufferAppend("<</Type /Font")
+            self._bufferAppend("/Subtype /Type0")
+            self._bufferAppend("/BaseFont /" + prefixedFontName + "")
+            self._bufferAppend("/Encoding /Identity-H")
             self._bufferAppend("/DescendantFonts [" \
                 + str(self.objectCount+1) + " 0 R]")
             self._bufferAppend("/ToUnicode " + str(self.objectCount+2) + " 0 R")
@@ -939,7 +1013,7 @@ class PaPDF:
                 charToGlyph[currChar * 2] = chr(currGlyph >> 8)
                 charToGlyph[currChar * 2 + 1] = chr(currGlyph & 0xFF)
             charToGlyph = "".join(charToGlyph).encode("latin1")
-            charToGlyph = zlib.compress(charToGlyph);
+            charToGlyph = zlib.compress(charToGlyph)
             self._addNewObject()
             self._bufferAppend("<</Length " + str(len(charToGlyph)) + "")
             self._bufferAppend("/Filter /FlateDecode")
@@ -998,6 +1072,7 @@ class PaPDF:
         # Adding the fonts to the PDF buffer:
         self._addTrueTypeFonts()
         self._addImageStreams()
+        self._addShadingObjects()
 
         # Adding the references:
         self.offsets[2]=len(self.buffer)
@@ -1017,17 +1092,24 @@ class PaPDF:
         for fontId, objectCount in fontReferences.items():
             self._bufferAppend("/F"+str(fontId)+" "+str(objectCount)+" 0 R")
         self._bufferAppend(">>")
-        self._bufferAppend("/XObject <<")
 
         # Adding the images:
+        self._bufferAppend("/XObject <<")
         imageIdToFontRef = {}
         for _, imgDesc in self.images.items():
             imageIdToFontRef[imgDesc["imageId"]] = \
             imgDesc["fontObjectReference"]
         for id, ref in imageIdToFontRef.items():
             self._bufferAppend("/I%d %d 0 R" % (id, ref))
-
         self._bufferAppend(">>")
+
+
+        # Adding the Shading Objects:
+        for shadingObject in self.shadingObjects:
+            self._bufferAppend("/Shading << /Sh%d %d 0 R >>" \
+                % (shadingObject["shadingObjectId"], \
+                    shadingObject["shadingObjectReference"]))
+
         self._bufferAppend(">>")
         self._bufferAppend("endobj")
 
