@@ -732,7 +732,9 @@ class PaPDF:
     def setFontSize(self, fontSize=-1):
         self.fontSize = fontSize
 
-    def addGradient(self, start2Coords, startColorHex, end2Coords, endColorHex):
+    def createGradient(self, start2Coords, startColorHex, end2Coords, \
+        endColorHex):
+
         def hex_to_color_array(hex_color):
             hex_color = hex_color.lstrip('#')
             if len(hex_color) != 6:
@@ -781,7 +783,6 @@ class PaPDF:
     def addGradientText(self, gradientId, coordinates, text):
         currFont = self.fonts[self.currentFontName]
         fontId = currFont["fontId"] + 1 # PDF font indices start at 1
-        fontId = 1
 
         # Update of the uniquely used characters, by the currFont font:
         newChars = [ord(c) for c in set(text) if ord(c) != 0]
