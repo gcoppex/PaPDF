@@ -77,6 +77,7 @@ class PaPDF:
         self.offsets = {}
         self.images = {}
         self.shadingObjects = []
+        self.extGStateObjects = []
 
 
         self._bufferAppend("%PDF-"+self.PDF_VERSION)
@@ -732,6 +733,16 @@ class PaPDF:
     def setFontSize(self, fontSize=-1):
         self.fontSize = fontSize
 
+    def createExtGStateObject(self, strokeAlpha, fillAlpha):
+        extGStateObjectId = len(self.extGStateObjects) + 1 # Starting id at 1
+        extGStateObjectReference = -1 # Created later
+        self.extGStateObjects.append({
+            "strokeAlpha": strokeAlpha,
+            "fillAlpha": strokeAlpha,
+            "extGStateObjectId": extGStateObjectId,
+            "extGStateObjectReference": extGStateObjectReference
+        })
+        return extGStateObjectId
     def createGradient(self, start2Coords, startColorHex, end2Coords, \
         endColorHex):
 
@@ -745,7 +756,7 @@ class PaPDF:
             return [r, g, b]
 
         shadingObjectId = len(self.shadingObjects) + 1 # Starting id at 1
-        shadingObjectReference = -1 # Ccreated later, by _addShadingObjects()
+        shadingObjectReference = -1 # Created later
         self.shadingObjects.append({
             "coords": [*start2Coords, *end2Coords],
             "startColor": hex_to_color_array(startColorHex),
@@ -754,6 +765,7 @@ class PaPDF:
             "shadingObjectReference": shadingObjectReference
         })
         return shadingObjectId
+
     def _addShadingObjects(self):
         for shadingObject in self.shadingObjects:
             self._addNewObject()
@@ -778,9 +790,21 @@ class PaPDF:
 
             self._bufferAppend("/Extend [true true]")
             self._bufferAppend(">>")
+            self._bufferAppend("endobj")
 
+    def _addExtGStateObjects(self):
+        for extGStateObject in self.extGStateObjects:
+            self._addNewObject()
+            extGStateObject["extGStateObjectReference"] = self.objectCount
 
-    def addGradientText(self, gradientId, coordinates, text):
+            self._bufferAppend("<< /Type /ExtGState")
+            self._bufferAppend("/CA %f" % extGStateObject["strokeAlpha"])
+            self._bufferAppend("/ca %f" % extGStateObject["fillAlpha"])
+            self._bufferAppend("/BM /Normal")
+            self._bufferAppend(">>")
+            self._bufferAppend("endobj")
+
+    def addGradientText(self, gradientId, coordinates, text, extGStateObjectId=None):
         currFont = self.fonts[self.currentFontName]
         fontId = currFont["fontId"] + 1 # PDF font indices start at 1
 
@@ -794,10 +818,12 @@ class PaPDF:
         output += "BT" + "\n"
         output += "/F"+str(fontId)+" 36 Tf " + "\n"
         output += "%s Td " % " ".join([str(x) for x in coordinates])+ "\n"
-        output += "4 Tr" + "\n"
+        output += "7 Tr" + "\n"
         #output += "1 0 0 1 10 10 Tm " + "\n"
         output += "(%s) Tj" % text + "\n"
         output += "ET" + "\n"
+        if extGStateObjectId is not None:
+            output += "/GS"+str(extGStateObjectId)+" gs" + "\n"
         output += "/Sh"+str(gradientId)+" sh" + "\n"
         output += "Q" + "\n"
 
@@ -1074,6 +1100,7 @@ class PaPDF:
         self._addTrueTypeFonts()
         self._addImageStreams()
         self._addShadingObjects()
+        self._addExtGStateObjects()
 
         # Adding the references:
         self.offsets[2]=len(self.buffer)
@@ -1110,6 +1137,11 @@ class PaPDF:
             self._bufferAppend("/Shading << /Sh%d %d 0 R >>" \
                 % (shadingObject["shadingObjectId"], \
                     shadingObject["shadingObjectReference"]))
+
+        for extGStateObject in self.extGStateObjects:
+            self._bufferAppend("/ExtGState << /GS%d %d 0 R >>" \
+                % (extGStateObject["extGStateObjectId"], \
+                    extGStateObject["extGStateObjectReference"]))
 
         self._bufferAppend(">>")
         self._bufferAppend("endobj")
