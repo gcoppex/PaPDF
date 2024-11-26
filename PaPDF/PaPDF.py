@@ -733,12 +733,13 @@ class PaPDF:
     def setFontSize(self, fontSize=-1):
         self.fontSize = fontSize
 
-    def createExtGStateObject(self, strokeAlpha, fillAlpha):
+    def createExtGStateObject(self, strokeAlpha, fillAlpha, blendMode):
         extGStateObjectId = len(self.extGStateObjects) + 1 # Starting id at 1
         extGStateObjectReference = -1 # Created later
         self.extGStateObjects.append({
             "strokeAlpha": strokeAlpha,
             "fillAlpha": strokeAlpha,
+            "blendMode": blendMode,
             "extGStateObjectId": extGStateObjectId,
             "extGStateObjectReference": extGStateObjectReference
         })
@@ -757,6 +758,7 @@ class PaPDF:
 
         shadingObjectId = len(self.shadingObjects) + 1 # Starting id at 1
         shadingObjectReference = -1 # Created later
+        print( [*start2Coords, *end2Coords])
         self.shadingObjects.append({
             "coords": [*start2Coords, *end2Coords],
             "startColor": hex_to_color_array(startColorHex),
@@ -800,8 +802,9 @@ class PaPDF:
             self._bufferAppend("<< /Type /ExtGState")
             self._bufferAppend("/CA %f" % extGStateObject["strokeAlpha"])
             self._bufferAppend("/ca %f" % extGStateObject["fillAlpha"])
-            self._bufferAppend("/BM /Normal")
+            self._bufferAppend("/BM /%s" % extGStateObject["blendMode"])
             self._bufferAppend(">>")
+
             self._bufferAppend("endobj")
 
     def addGradientText(self, gradientId, coordinates, text, extGStateObjectId=None):
@@ -816,7 +819,7 @@ class PaPDF:
         output = ""
         output += "q" + "\n"
         output += "BT" + "\n"
-        output += "/F"+str(fontId)+" 36 Tf " + "\n"
+        output += "/F%d %.2f Tf\n" % (fontId, self.fontSize)
         output += "%s Td " % " ".join([str(x) for x in coordinates])+ "\n"
         output += "7 Tr" + "\n"
         #output += "1 0 0 1 10 10 Tm " + "\n"
