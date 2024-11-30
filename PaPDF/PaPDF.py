@@ -508,47 +508,49 @@ class PaPDF:
 
 
     def addImage(self, filename, x, y, width, height):
-        with open(filename,"rb") as f:
-            h, w, stream, extraInfos, extraObjects = 0, 0, b'', [], []
-            imageId = len(self.images)+1 # PDF object refs starts at 1
-            hasBeenEmbedded = False
+        if not filename in self.images.keys():
+            with open(filename,"rb") as f:
+                h, w, stream, extraInfos, extraObjects = 0, 0, b'', [], []
+                imageId = len(self.images)+1 # PDF object refs starts at 1
+                hasBeenEmbedded = False
 
-            imgExt = os.path.splitext(filename)[1].lower().replace(".","")
-            if imgExt == "jpeg" or imgExt == "jpg":
-                try:
-                    h, w, stream, extraInfos, extraObjects = self._decodeJPG(f)
-                    hasBeenEmbedded = True
-                except Exception as e:
-                    pass
-            elif imgExt == "png":
-                try:
-                    h, w, stream, extraInfos, extraObjects = self._decodePNG(f)
-                    hasBeenEmbedded = True
-                except Exception as e:
-                    pass
-
-            if not hasBeenEmbedded:
-                # Iterative try to parse the image:
-                for func in [self._decodeJPG, self._decodePNG]:
+                imgExt = os.path.splitext(filename)[1].lower().replace(".","")
+                if imgExt == "jpeg" or imgExt == "jpg":
                     try:
-                        f.seek(0)
-                        h, w, stream, extraInfos, extraObjects = func(f)
+                        h, w, stream, extraInfos, extraObjects = self._decodeJPG(f)
                         hasBeenEmbedded = True
-                        break
                     except Exception as e:
                         pass
-            if not hasBeenEmbedded:
-                raise Exception("The provided image could not be read.")
-            else:
-                self.images[filename] = {
-                    "height": h,
-                    "width": w,
-                    "fontObjectReference": -1,
-                    "imageId": imageId,
-                    "data": stream,
-                    "extraInfos": extraInfos,
-                    "extraObjects": extraObjects,
-                }
+                elif imgExt == "png":
+                    try:
+                        h, w, stream, extraInfos, extraObjects = self._decodePNG(f)
+                        hasBeenEmbedded = True
+                    except Exception as e:
+                        pass
+
+                if not hasBeenEmbedded:
+                    # Iterative try to parse the image:
+                    for func in [self._decodeJPG, self._decodePNG]:
+                        try:
+                            f.seek(0)
+                            h, w, stream, extraInfos, extraObjects = func(f)
+                            hasBeenEmbedded = True
+                            break
+                        except Exception as e:
+                            pass
+                if not hasBeenEmbedded:
+                    raise Exception("The provided image could not be read.")
+                else:
+                    self.images[filename] = {
+                        "height": h,
+                        "width": w,
+                        "fontObjectReference": -1,
+                        "imageId": imageId,
+                        "data": stream,
+                        "extraInfos": extraInfos,
+                        "extraObjects": extraObjects,
+                    }
+        imageId = self.images[filename]["imageId"]
         output = ""
         output += "q %.2f 0 0 %.2f %.2f %.2f cm /I%d Do Q\n" \
         % (width * PaPDF.MM_TO_DPI,
